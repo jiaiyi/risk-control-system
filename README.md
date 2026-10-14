@@ -80,8 +80,22 @@ risk-control-system/
 ### 1. 环境要求
 
 - Python 3.12
-- MySQL 8.0+（库名默认 `ecs`）
-- Redis 7.x（可选，关闭后自动降级直查数据库）
+- MySQL 8.0+（库名 `ecs`）
+- Redis（可选，关闭后自动降级直查数据库）
+
+**本机已安装**（位于 `D:\idetools_main\`）：
+
+| 服务 | 版本 | 端口 | 启动方式 |
+|------|------|------|---------|
+| MySQL | 8.0.40 | 3306 | 双击 `D:\idetools_main\mysql\start-mysql.bat` |
+| Redis | 5.0.14.1 | 6379 | 双击 `D:\idetools_main\redis\start-redis.bat` |
+
+一键启动两个服务：`D:\idetools_main\start-db-services.bat`
+
+> 说明：Redis 使用 Windows 移植版（tporadowski），版本为 5.0 —— Redis 官方自 6.0 起不再提供 Windows 版本。
+> 本项目用到的命令（SETEX / GET / DEL / ZSET / TTL）5.0 均支持。
+>
+> MySQL 连接账号：`root` / 空密码（仅本地开发环境）。
 
 ### 2. 安装依赖
 
