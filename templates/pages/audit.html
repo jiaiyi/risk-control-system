@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}审计日志{% endblock %}
+
+{% block content %}
+<div class="kpi-grid" id="auditStats"></div>
+
+<div class="card">
+  <div class="card-header flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <select class="form-select form-select-sm w-auto" id="fActionType">
+        <option value="">全部类别</option>
+        <option>规则</option><option>名单</option><option>案件</option><option>配置</option>
+      </select>
+      <input class="form-control form-control-sm" id="fOperator" placeholder="操作人"
+             style="width:130px">
+      <input class="form-control form-control-sm" id="fTarget" placeholder="目标 ID"
+             style="width:130px">
+      <input class="form-control form-control-sm" id="fKeyword" placeholder="操作描述关键字"
+             style="width:170px">
+      <button class="btn btn-sm btn-outline-secondary" id="btnSearch">查询</button>
+    </div>
+  </div>
+
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr>
+          <th style="width:70px">#</th><th>时间</th><th>类别</th>
+          <th>操作</th><th>操作人</th><th>目标</th><th>变更前后</th>
+        </tr></thead>
+        <tbody id="auditBody">
+          <tr><td colspan="7" class="empty-state">
+            <div class="spinner-border text-primary"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card-header border-top border-bottom-0">
+    <div class="subtitle" id="pageInfo">-</div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" id="btnPrev">上一页</button>
+      <button class="btn btn-sm btn-outline-secondary" id="btnNext">下一页</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+
+const TYPE_BADGE = {
+  "规则": "badge-review", "名单": "badge-mark",
+  "案件": "badge-challenge", "配置": "badge-gray",
+};
+
+let page = 1, pageSize = 20, total = 0;
+
+function buildQuery() {
+  return new URLSearchParams({
+    page, page_size: pageSize,
+    action_type: $("fActionType").value,
+    operator: $("fOperator").value.trim(),
+    target_id: $("fTarget").value.trim(),
+    keyword: $("fKeyword").value.trim(),
+  }).toString();
+}
+
+function fmtValue(v) {
+  if (v === null || v === undefined) return '<span class="text-muted">-</span>';
+  if (typeof v === "object") return `<code style="font-size:11px">${JSON.stringify(v).slice(0, 60)}</code>`;
+  return String(v);
+}
+
+async function loadAudit() {
+  const data = await api("/api/audit-logs?" + buildQuery());
+  total = data.total;
+  const body = $("auditBody");
+  if (!data.items.length) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-state">
+      <div class="icon">✎</div>没有符合条件的审计记录</td></tr>`;
+  } else {
+    body.innerHTML = data.items.map(r => `
+      <tr>
+        <td class="text-muted">${r.log_id}</td>
+        <td style="font-size:12px;white-space:nowrap">${(r.create_time || "").replace("T", " ")}</td>
+        <td><span class="badge ${TYPE_BADGE[r.action_type] || "badge-gray"}">${r.action_type}</span></td>
+        <td style="max-width:260px">${r.action_desc}</td>
+        <td>${r.operator}</td>
+        <td><code style="font-size:11.5px">${r.target_id}</code></td>
+        <td style="max-width:220px;font-size:11.5px">
+          ${fmtValue(r.before_value)} → ${fmtValue(r.after_value)}
+        </td>
+      </tr>`).join("");
+  }
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  $("pageInfo").textContent = `共 ${total} 条 · 第 ${page} / ${pages} 页`;
+  $("btnPrev").disabled = page <= 1;
+  $("btnNext").disabled = page >= pages;
+}
+
+async function loadStats() {
+  const s = await api("/api/audit-logs?page_size=1");
+  const by = s.statistics.by_action_type;
+  const total = s.statistics.total;
+  $("auditStats").innerHTML = [
+    { label: "审计流水总数", value: total, icon: "✎" },
+    { label: "规则操作", value: by["规则"] || 0, icon: "≡" },
+    { label: "名单操作", value: by["名单"] || 0, icon: "☰" },
+    { label: "案件操作", value: by["案件"] || 0, icon: "◈" },
+    { label: "配置变更", value: by["配置"] || 0, icon: "⚙" },
+  ].map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value">${c.value}</div>
+    </div>`).join("");
+}
+
+$("btnSearch").addEventListener("click", () => { page = 1; loadAudit(); });
+$("fActionType").addEventListener("change", () => { page = 1; loadAudit(); });
+["fOperator", "fTarget", "fKeyword"].forEach(id =>
+  $(id).addEventListener("keydown", e => { if (e.key === "Enter") { page = 1; loadAudit(); } }));
+$("btnPrev").addEventListener("click", () => { if (page > 1) { page--; loadAudit(); } });
+$("btnNext").addEventListener("click", () => { page++; loadAudit(); });
+
+loadStats(); loadAudit();
+</script>
+{% endblock %}

@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}AI 助手{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+  <!-- ==================== 会话列表 ==================== -->
+  <div class="card mb-0">
+    <div class="card-header">
+      <div class="title">会话记录</div>
+      <button class="btn btn-sm btn-outline-primary" id="btnNewChat">+ 新对话</button>
+    </div>
+    <div class="card-body p-2 chat-sessions" id="sessionList">
+      <div class="empty-state py-4" style="font-size:12.5px">暂无历史会话</div>
+    </div>
+    <div class="card-header border-top border-bottom-0">
+      <button class="btn btn-sm btn-outline-secondary w-100" id="btnClear">清空历史</button>
+    </div>
+  </div>
+
+  <!-- ==================== 对话区 ==================== -->
+  <div class="card mb-0">
+    <div class="card-header">
+      <div>
+        <div class="title">AI 风控助手</div>
+        <div class="subtitle">
+          8 个工具 · LangGraph ReAct 编排 · 会话持久化
+          <span class="badge badge-gray ms-1" id="modelBadge">{{ llm_model }}</span>
+        </div>
+      </div>
+      <span class="subtitle" id="sessionHint">新会话</span>
+    </div>
+
+    <div class="card-body">
+      <div class="chat-stream" id="chatStream">
+        <div class="msg-ai">
+          <div class="bubble">
+            你好，我是风控 AI 助手。可以问我：<br>
+            · 「用户 1003 的风险画像怎么样」<br>
+            · 「对用户 1002 发起一次登录风控检查」<br>
+            · 「最近风控大盘情况」<br>
+            · 「L002 这条规则最近命中了多少」<br>
+            <div class="text-muted mt-2" style="font-size:12px">
+              涉及名单增删等写操作时，我会先跟你确认再执行。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input-bar">
+        <input id="chatInput" placeholder="输入问题，回车发送" maxlength="2000">
+        <button class="btn btn-primary" id="btnSend">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let sessionId = null;
+let sending = false;
+
+const $ = (id) => document.getElementById(id);
+
+function scrollBottom() {
+  const box = $("chatStream");
+  box.scrollTop = box.scrollHeight;
+}
+
+function addUserMsg(text) {
+  const el = document.createElement("div");
+  el.className = "msg-user";
+  el.innerHTML = `<div class="bubble"></div>`;
+  el.querySelector(".bubble").textContent = text;
+  $("chatStream").appendChild(el);
+  scrollBottom();
+}
+
+/** 极简 Markdown 渲染（标题/列表/表格/代码/粗体） */
+function renderMd(md) {
+  let html = md
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/^### (.*)$/gm, "<h5>$1</h5>")
+    .replace(/^## (.*)$/gm, "<h4>$1</h4>")
+    .replace(/^# (.*)$/gm, "<h4>$1</h4>")
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+  // 表格
+  const lines = html.split("\n");
+  let out = [], inTable = false;
+  for (const ln of lines) {
+    if (/^\|/.test(ln)) {
+      if (!inTable) { out.push('<div class="table-responsive"><table class="table table-sm">'); inTable = true; }
+      if (/^\|[\s:\-|]+\|$/.test(ln)) continue;    // 分隔行
+      const cells = ln.split("|").slice(1, -1).map(c => c.trim());
+      const tag = out.length && /^\|<\/?thead>/.test("") ? "td" : "td";
+      out.push("<tr>" + cells.map(c => `<td>${c}</td>`).join("") + "</tr>");
+    } else {
+      if (inTable) { out.push("</table></div>"); inTable = false; }
+      out.push(ln);
+    }
+  }
+  if (inTable) out.push("</table></div>");
+  html = out.join("\n");
+  // 列表
+  html = html.replace(/(?:^|\n)((?:\s*[-•]\s+.*(?:\n|$))+)/g, (m, block) => {
+    const items = block.trim().split("\n").map(l => `<li>${l.replace(/^\s*[-•]\s*/, "")}</li>`).join("");
+    return `\n<ul>${items}</ul>\n`;
+  });
+  return html.replace(/\n{2,}/g, "<br>");
+}
+
+function addAiMsg(text, tools) {
+  const el = document.createElement("div");
+  el.className = "msg-ai";
+  el.innerHTML = `<div class="bubble"></div>`;
+  const bubble = el.querySelector(".bubble");
+  if (tools && tools.length) {
+    const chips = document.createElement("div");
+    chips.className = "tool-calls";
+    chips.innerHTML = tools.map(t => `<span class="tool-chip ok">✓ ${t}</span>`).join("");
+    bubble.appendChild(chips);
+  }
+  const body = document.createElement("div");
+  body.innerHTML = renderMd(text);
+  bubble.appendChild(body);
+  $("chatStream").appendChild(el);
+  scrollBottom();
+}
+
+function addAiStreaming() {
+  const el = document.createElement("div");
+  el.className = "msg-ai";
+  el.innerHTML = `<div class="bubble">
+      <div class="tool-calls" id="streamTools"></div>
+      <div id="streamText" class="text-muted">
+        <span class="spinner-border spinner-border-sm text-primary"></span> 思考中…
+      </div>
+    </div>`;
+  $("chatStream").appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+async function send() {
+  const input = $("chatInput");
+  const text = input.value.trim();
+  if (!text || sending) return;
+
+  sending = true;
+  $("btnSend").disabled = true;
+  addUserMsg(text);
+  input.value = "";
+
+  const box = addAiStreaming();
+  const toolsBox = box.querySelector("#streamTools");
+  const textBox = box.querySelector("#streamText");
+
+  try {
+    const res = await fetch("/api/agent/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "", full = "", usedTools = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, "").trim();
+        if (!line) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch (e) { continue; }
+
+        if (ev.error) { throw new Error(ev.error); }
+        if (ev.chunk) {
+          full += ev.chunk;
+          textBox.classList.remove("text-muted");
+          textBox.innerHTML = renderMd(full);
+          scrollBottom();
+        }
+        if (ev.done) { sessionId = ev.session_id; }
+      }
+    }
+
+    if (!full) {
+      textBox.innerHTML = '<span class="text-muted">（无回复内容）</span>';
+    }
+    loadSessions();
+  } catch (err) {
+    textBox.innerHTML = `<span class="text-danger">出错了：${err.message}</span>`;
+  } finally {
+    sending = false;
+    $("btnSend").disabled = false;
+    input.focus();
+  }
+}
+
+async function loadSessions() {
+  const data = await api("/api/agent/sessions");
+  const box = $("sessionList");
+  if (!data.items.length) {
+    box.innerHTML = `<div class="empty-state py-4" style="font-size:12.5px">暂无历史会话</div>`;
+    return;
+  }
+  box.innerHTML = data.items.map(s => `
+    <div class="chat-session-item ${s.session_id === sessionId ? "active" : ""}"
+         data-sid="${s.session_id}">
+      <div class="t">${(s.session_id || "").slice(0, 18)}…</div>
+      <div class="d">${s.message_count || 0} 条消息 · ${s.updated_at || ""}</div>
+    </div>`).join("");
+  box.querySelectorAll(".chat-session-item").forEach(el =>
+    el.addEventListener("click", () => switchSession(el.dataset.sid)));
+}
+
+async function switchSession(sid) {
+  if (!sid) return;
+  sessionId = sid;
+  $("sessionHint").textContent = `会话 ${sid.slice(0, 14)}…`;
+  const box = $("chatStream");
+  box.innerHTML = `
+    <div class="msg-ai"><div class="bubble">
+      已切换到历史会话。上下文已从 Redis 恢复（最近若干轮），
+      可以直接接着问，或点「新对话」重新开始。
+    </div></div>`;
+  loadSessions();
+}
+
+$("btnSend").addEventListener("click", send);
+$("chatInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$("btnNewChat").addEventListener("click", () => {
+  sessionId = null;
+  $("sessionHint").textContent = "新会话";
+  $("chatStream").innerHTML = `
+    <div class="msg-ai"><div class="bubble">新对话已开始，请提问。</div></div>`;
+  loadSessions();
+});
+$("btnClear").addEventListener("click", async () => {
+  if (!sessionId) { toast("当前没有活动会话", "err"); return; }
+  await api("/api/agent/clear", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId }),
+  });
+  toast("会话已清空");
+  sessionId = null;
+  $("chatStream").innerHTML = `<div class="msg-ai"><div class="bubble">会话已清空，请重新提问。</div></div>`;
+  loadSessions();
+});
+
+loadSessions();
+</script>
+{% endblock %}

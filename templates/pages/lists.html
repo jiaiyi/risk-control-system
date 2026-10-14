@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+{% block title %}名单管理{% endblock %}
+
+{% block content %}
+<!-- ==================== 统计 ==================== -->
+<div class="kpi-grid" id="listStats"></div>
+
+<div class="row g-3">
+  <!-- ==================== 名单列表 ==================== -->
+  <div class="col-lg-8">
+    <div class="card mb-0">
+      <div class="card-header flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="btn-group btn-group-sm" role="group" id="typeTabs">
+            <button class="btn btn-outline-secondary active" data-t="">全部</button>
+            <button class="btn btn-outline-secondary" data-t="黑名单">黑名单</button>
+            <button class="btn btn-outline-secondary" data-t="白名单">白名单</button>
+            <button class="btn btn-outline-secondary" data-t="灰名单">灰名单</button>
+          </div>
+          <select class="form-select form-select-sm w-auto" id="fEntityType">
+            <option value="">全部主体</option>
+            <option>用户</option><option>手机号</option><option>IP</option>
+            <option>设备</option><option>地址</option>
+          </select>
+          <input class="form-control form-control-sm" id="fKeyword" placeholder="主体值"
+                 style="width:150px">
+          <div class="form-check ms-1 mb-0">
+            <input class="form-check-input" type="checkbox" id="fIncludeExpired">
+            <label class="form-check-label small" for="fIncludeExpired">含过期</label>
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-secondary" id="btnImport">批量导入</button>
+          <button class="btn btn-sm btn-outline-secondary" id="btnTemplate">下载模板</button>
+          <button class="btn btn-sm btn-primary" id="btnAdd">+ 新增</button>
+        </div>
+      </div>
+
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead><tr>
+              <th>类型</th><th>主体</th><th>主体值</th><th>原因</th>
+              <th>有效期至</th><th>操作人</th><th class="text-end">操作</th>
+            </tr></thead>
+            <tbody id="listBody">
+              <tr><td colspan="7" class="empty-state">
+                <div class="spinner-border text-primary"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 历史归档检索 ==================== -->
+  <div class="col-lg-4">
+    <div class="card mb-0">
+      <div class="card-header">
+        <div><div class="title">历史名单检索</div>
+             <div class="subtitle">归档表独立检索（FR-42）</div></div>
+      </div>
+      <div class="card-body">
+        <div class="mb-2">
+          <label class="form-label small">主体类型</label>
+          <select class="form-select form-select-sm" id="aEntityType">
+            <option value="">全部</option>
+            <option>用户</option><option>手机号</option><option>IP</option>
+            <option>设备</option><option>地址</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">主体值（精确匹配）</label>
+          <input class="form-control form-control-sm" id="aEntityValue" placeholder="如 D-SHARED-0001">
+        </div>
+        <button class="btn btn-sm btn-outline-primary w-100" id="btnSearchArchived">检索归档</button>
+        <div id="archivedBody" class="mt-3 small text-muted">输入主体值后点检索</div>
+      </div>
+    </div>
+
+    <div class="card mb-0">
+      <div class="card-header"><div class="title">白名单硬约束</div></div>
+      <div class="card-body small text-muted">
+        <ul class="mb-0 ps-3">
+          <li>必须设置有效期，<b>禁止永久加白</b></li>
+          <li>有效期不超过 <b>90 天</b>，超出需二次确认</li>
+          <li>主体在黑名单中时<b>不得直接加白</b></li>
+          <li>准入主体仅限：战略客户 / 平台自营 / 误判澄清用户</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 新增弹窗 ==================== -->
+<div class="modal fade" id="addModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">新增名单项</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">名单类型</label>
+          <select class="form-select" id="mListType">
+            <option>黑名单</option><option>白名单</option><option>灰名单</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">主体类型</label>
+          <select class="form-select" id="mEntityType">
+            <option>用户</option><option>手机号</option><option>IP</option>
+            <option>设备</option><option>地址</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">主体值</label>
+          <input class="form-control" id="mEntityValue" placeholder="如 1003 / D-XXX / 10.x.x.x">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">原因 / 凭据</label>
+          <input class="form-control" id="mReason" placeholder="加入原因或准入凭据编号">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">有效期至</label>
+          <input type="datetime-local" class="form-control" id="mExpire">
+          <div class="subtitle mt-1" style="font-size:11.5px">
+            白名单必填且不超 90 天；灰名单留空则默认 30 天；黑名单留空表示永久
+          </div>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="mForce">
+          <label class="form-check-label small" for="mForce">
+            白名单超过 90 天，我确认继续（force）
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" id="btnSaveItem">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 导入弹窗 ==================== -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">批量导入</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="alert alert-warning small mb-3">
+          <b>整批校验、整批入库</b>：任一行有错则<b>一行都不写</b>，并一次性返回全部错误行。
+        </div>
+        <input type="file" class="form-control" id="importFile" accept=".xlsx,.csv">
+        <div id="importResult" class="mt-3"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+        <button class="btn btn-primary" id="btnDoImport">上传并导入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let curType = "";
+let addModal = null, importModal = null;
+
+function buildQuery() {
+  const p = new URLSearchParams({
+    page: 1, page_size: 50,
+    list_type: curType,
+    entity_type: document.getElementById("fEntityType").value,
+    keyword: document.getElementById("fKeyword").value.trim(),
+    include_expired: document.getElementById("fIncludeExpired").checked,
+  });
+  return p.toString();
+}
+
+async function loadList() {
+  const data = await api("/api/lists?" + buildQuery());
+  const body = document.getElementById("listBody");
+  if (!data.items.length) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-state">
+      <div class="icon">☰</div>没有符合条件的名单条目</td></tr>`;
+    return;
+  }
+  body.innerHTML = data.items.map(i => `
+    <tr>
+      <td>${listBadge(i.list_type)}</td>
+      <td>${i.entity_type}</td>
+      <td><code>${i.entity_value}</code></td>
+      <td style="max-width:220px">${i.reason || '<span class="text-muted">-</span>'}</td>
+      <td style="font-size:12px">
+        ${i.expire_time || '<span class="text-muted">永久</span>'}
+        ${i.expired ? '<span class="badge badge-reject ms-1">已过期</span>' : ''}
+      </td>
+      <td>${i.created_by || "-"}</td>
+      <td class="text-end">
+        <button class="btn btn-sm btn-outline-danger" onclick="delItem(${i.list_id})">移除</button>
+      </td>
+    </tr>`).join("");
+}
+
+async function loadStats() {
+  const s = await api("/api/lists/statistics");
+  const cards = [
+    { label: "黑名单", value: s.by_list_type["黑名单"] || 0, icon: "⛔" },
+    { label: "白名单", value: s.by_list_type["白名单"] || 0, icon: "✓" },
+    { label: "灰名单", value: s.by_list_type["灰名单"] || 0, icon: "⚠" },
+    { label: "已过期待归档", value: s.expired, icon: "⌛" },
+    { label: "历史归档", value: s.archived, icon: "▤" },
+  ];
+  document.getElementById("listStats").innerHTML = cards.map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value">${c.value}</div>
+    </div>`).join("");
+}
+
+async function delItem(id) {
+  if (!confirm(`确认移除名单项 #${id}？`)) return;
+  await api(`/api/lists/${id}?operator=admin`, { method: "DELETE" });
+  toast("已移除（操作已记审计）");
+  loadList(); loadStats();
+}
+
+document.getElementById("typeTabs").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-t]");
+  if (!btn) return;
+  document.querySelectorAll("#typeTabs button").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  curType = btn.dataset.t;
+  loadList();
+});
+["fEntityType", "fIncludeExpired"].forEach(id =>
+  document.getElementById(id).addEventListener("change", loadList));
+document.getElementById("fKeyword").addEventListener("keydown", e => {
+  if (e.key === "Enter") loadList();
+});
+
+document.getElementById("btnAdd").addEventListener("click", () => addModal.show());
+document.getElementById("btnImport").addEventListener("click", () => importModal.show());
+
+document.getElementById("btnTemplate").addEventListener("click", async () => {
+  const r = await api("/api/lists/template");
+  const bin = atob(r.content_base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes],
+    { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = r.filename; a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("btnSaveItem").addEventListener("click", async () => {
+  const expire = document.getElementById("mExpire").value;
+  try {
+    await api("/api/lists", {
+      method: "POST",
+      body: JSON.stringify({
+        list_type: document.getElementById("mListType").value,
+        entity_type: document.getElementById("mEntityType").value,
+        entity_value: document.getElementById("mEntityValue").value.trim(),
+        reason: document.getElementById("mReason").value.trim(),
+        expire_time: expire ? expire.replace("T", " ") + ":00" : null,
+        created_by: "web",
+        force: document.getElementById("mForce").checked,
+      }),
+    });
+    toast("名单项已新增");
+    addModal.hide();
+    document.getElementById("mEntityValue").value = "";
+    document.getElementById("mReason").value = "";
+    document.getElementById("mExpire").value = "";
+    loadList(); loadStats();
+  } catch (e) { /* 已提示 */ }
+});
+
+document.getElementById("btnDoImport").addEventListener("click", async () => {
+  const file = document.getElementById("importFile").files[0];
+  if (!file) { toast("请先选择文件", "err"); return; }
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("operator", "web");
+  const box = document.getElementById("importResult");
+  box.innerHTML = '<div class="spinner-border spinner-border-sm text-primary"></div> 导入中…';
+  try {
+    const res = await fetch("/api/lists/import", { method: "POST", body: fd });
+    const r = await res.json();
+    if (r.success) {
+      box.innerHTML = `<div class="alert alert-success mb-0">
+        成功导入 <b>${r.imported}</b> 行</div>`;
+      loadList(); loadStats();
+    } else {
+      box.innerHTML = `<div class="alert alert-danger mb-2">
+        ${r.message || "校验未通过"}（错误 ${r.failed} 行 / 共 ${r.total} 行）</div>
+        <div class="table-responsive" style="max-height:260px;overflow:auto">
+        <table class="table table-sm"><thead><tr><th>行号</th><th>错误</th></tr></thead>
+        <tbody>${r.errors.map(e => `<tr><td>第 ${e.row} 行</td><td>${e.message}</td></tr>`).join("")}</tbody>
+        </table></div>`;
+    }
+  } catch (err) {
+    box.innerHTML = `<div class="alert alert-danger mb-0">上传失败：${err.message}</div>`;
+  }
+});
+
+document.getElementById("btnSearchArchived").addEventListener("click", async () => {
+  const val = document.getElementById("aEntityValue").value.trim();
+  if (!val) { toast("请输入主体值", "err"); return; }
+  const p = new URLSearchParams({
+    entity_type: document.getElementById("aEntityType").value,
+    entity_value: val,
+    page_size: 20,
+  });
+  const data = await api("/api/lists/archived?" + p.toString());
+  const box = document.getElementById("archivedBody");
+  if (!data.items.length) {
+    box.innerHTML = `<div class="empty-state py-3">该主体没有归档记录</div>`;
+    return;
+  }
+  box.innerHTML = data.items.map(a => `
+    <div class="d-flex justify-content-between align-items-start border-bottom py-2">
+      <div>
+        ${listBadge(a.list_type)}
+        <span class="text-muted" style="font-size:11.5px">${a.archive_time}</span>
+        <div class="text-muted" style="font-size:11.5px">${a.archive_reason || ""}</div>
+      </div>
+      <span class="text-muted" style="font-size:11px">#${a.original_list_id}</span>
+    </div>`).join("");
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  addModal = new bootstrap.Modal(document.getElementById("addModal"));
+  importModal = new bootstrap.Modal(document.getElementById("importModal"));
+});
+
+loadStats(); loadList();
+</script>
+{% endblock %}

@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}规则管理{% endblock %}
+
+{% block content %}
+<!-- ==================== 统计条 ==================== -->
+<div class="kpi-grid" id="ruleStats"></div>
+
+<!-- ==================== 筛选 + 列表 ==================== -->
+<div class="card">
+  <div class="card-header flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <select class="form-select form-select-sm w-auto" id="fCategory">
+        <option value="">全部分类</option>
+      </select>
+      <select class="form-select form-select-sm w-auto" id="fEventType">
+        <option value="">全部事件</option>
+      </select>
+      <select class="form-select form-select-sm w-auto" id="fLevel">
+        <option value="">全部等级</option>
+        <option>低</option><option>中</option><option>高</option><option>极高</option>
+      </select>
+      <select class="form-select form-select-sm w-auto" id="fEnabled">
+        <option value="">启停状态</option>
+        <option value="1">已启用</option>
+        <option value="0">已停用</option>
+      </select>
+      <input class="form-control form-control-sm" id="fKeyword" placeholder="规则 ID / 名称"
+             style="width:170px">
+      <button class="btn btn-sm btn-outline-secondary" id="btnSearch">查询</button>
+    </div>
+    <a href="/rules/new" class="btn btn-sm btn-primary">+ 新建规则</a>
+  </div>
+
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>规则 ID</th><th>名称</th><th>分类</th><th>事件</th>
+            <th>等级</th><th>分值</th><th>动作</th><th>优先级</th>
+            <th>状态</th><th class="text-end">操作</th>
+          </tr>
+        </thead>
+        <tbody id="rulesBody">
+          <tr><td colspan="10" class="empty-state">
+            <div class="spinner-border text-primary"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card-header border-top border-bottom-0">
+    <div class="subtitle" id="pageInfo">-</div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" id="btnPrev">上一页</button>
+      <button class="btn btn-sm btn-outline-secondary" id="btnNext">下一页</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATEGORIES = ["订单欺诈", "支付风险", "账户风险", "售后滥用", "地址风险",
+                    "物流风险", "登录安全", "营销薅羊毛", "黄牛囤货", "聚集风险"];
+const EVENT_TYPES = ["登录", "营销领券", "下单", "支付", "售后申请", "物流投诉", "通用"];
+
+let page = 1, pageSize = 20, total = 0;
+
+document.getElementById("fCategory").innerHTML =
+  '<option value="">全部分类</option>' + CATEGORIES.map(c => `<option>${c}</option>`).join("");
+document.getElementById("fEventType").innerHTML =
+  '<option value="">全部事件</option>' + EVENT_TYPES.map(c => `<option>${c}</option>`).join("");
+
+function buildQuery() {
+  const p = new URLSearchParams({
+    page, page_size: pageSize,
+    category: document.getElementById("fCategory").value,
+    event_type: document.getElementById("fEventType").value,
+    risk_level: document.getElementById("fLevel").value,
+    is_enabled: document.getElementById("fEnabled").value,
+    keyword: document.getElementById("fKeyword").value.trim(),
+  });
+  return p.toString();
+}
+
+async function loadRules() {
+  const data = await api("/api/rules?" + buildQuery());
+  total = data.total;
+  const body = document.getElementById("rulesBody");
+
+  if (!data.items.length) {
+    body.innerHTML = `<tr><td colspan="10" class="empty-state">
+      <div class="icon">≡</div>没有符合条件的规则</td></tr>`;
+  } else {
+    body.innerHTML = data.items.map(r => `
+      <tr>
+        <td><a href="/rules/${r.rule_id}" class="text-decoration-none"><b>${r.rule_id}</b></a></td>
+        <td>${r.rule_name}<div class="text-muted" style="font-size:11.5px">${r.description || ""}</div></td>
+        <td>${r.rule_category}</td>
+        <td><span class="badge badge-gray">${r.event_type}</span></td>
+        <td>${levelBadge(r.risk_level)}</td>
+        <td><b>${r.risk_score}</b></td>
+        <td>${r.action}</td>
+        <td>${r.priority}</td>
+        <td>${r.is_enabled
+              ? '<span class="badge badge-pass">启用</span>'
+              : '<span class="badge badge-gray">停用</span>'}</td>
+        <td class="text-end text-nowrap">
+          <button class="btn btn-sm btn-outline-secondary" onclick="toggleRule('${r.rule_id}', ${r.is_enabled ? 0 : 1})">
+            ${r.is_enabled ? "停用" : "启用"}
+          </button>
+          <button class="btn btn-sm btn-outline-danger ms-1" onclick="delRule('${r.rule_id}')">删除</button>
+        </td>
+      </tr>`).join("");
+  }
+
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  document.getElementById("pageInfo").textContent =
+    `共 ${total} 条 · 第 ${page} / ${pages} 页`;
+  document.getElementById("btnPrev").disabled = page <= 1;
+  document.getElementById("btnNext").disabled = page >= pages;
+}
+
+async function loadStats() {
+  const s = await api("/api/rules/statistics");
+  const cards = [
+    { label: "规则总数", value: s.total, icon: "≡" },
+    { label: "已启用", value: s.enabled, icon: "✓" },
+    { label: "已停用", value: s.total - s.enabled, icon: "⏸" },
+    { label: "覆盖场景", value: Object.keys(s.by_category).length, icon: "◈" },
+  ];
+  document.getElementById("ruleStats").innerHTML = cards.map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value">${c.value}</div>
+    </div>`).join("");
+}
+
+async function toggleRule(ruleId, enabled) {
+  if (!confirm(`确认${enabled ? "启用" : "停用"}规则 ${ruleId}？`)) return;
+  await api(`/api/rules/${ruleId}/toggle`, {
+    method: "PUT", body: JSON.stringify({ is_enabled: enabled }),
+  });
+  toast(`规则已${enabled ? "启用" : "停用"}，下一次检查立即生效`);
+  loadRules(); loadStats();
+}
+
+async function delRule(ruleId) {
+  if (!confirm(`确认删除规则 ${ruleId}？\n（逻辑删除：历史案件的命中记录仍可追溯）`)) return;
+  await api(`/api/rules/${ruleId}`, { method: "DELETE" });
+  toast("规则已逻辑删除");
+  loadRules(); loadStats();
+}
+
+document.getElementById("btnSearch").addEventListener("click", () => { page = 1; loadRules(); });
+document.getElementById("fKeyword").addEventListener("keydown", e => {
+  if (e.key === "Enter") { page = 1; loadRules(); }
+});
+["fCategory", "fEventType", "fLevel", "fEnabled"].forEach(id =>
+  document.getElementById(id).addEventListener("change", () => { page = 1; loadRules(); }));
+document.getElementById("btnPrev").addEventListener("click", () => { if (page > 1) { page--; loadRules(); } });
+document.getElementById("btnNext").addEventListener("click", () => { page++; loadRules(); });
+
+loadStats(); loadRules();
+</script>
+{% endblock %}

@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}关联图谱{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-3">
+  <div class="col-lg-4">
+    <div class="card mb-0">
+      <div class="card-header"><div class="title">查询条件</div></div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">中心主体类型</label>
+          <select class="form-select form-select-sm" id="gEntityType">
+            <option>用户</option><option>设备</option><option>IP</option>
+            <option>手机号</option><option>地址</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">中心主体值</label>
+          <div class="input-group input-group-sm">
+            <input class="form-control" id="gEntityValue" value="1003">
+            <button class="btn btn-outline-secondary" type="button" id="btnQuery">查询</button>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">跳数：<b id="gHopsLabel">2</b> 跳</label>
+          <input type="range" class="form-range" id="gHops" min="1" max="3" value="2">
+          <div class="subtitle" style="font-size:11.5px">
+            默认 2 跳 —— 1 跳只能看到「用户→设备」的直接关联，
+            2 跳才能看到「用户→设备→其他用户」的团伙形态
+          </div>
+        </div>
+        <div class="alert alert-warning small mb-0" id="gTruncateTip" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="kpi-grid mb-0" id="gStats"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div><div class="title">关联网络</div>
+         <div class="subtitle" id="gSubtitle">节点 = 主体 · 边 = 关联关系</div></div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" id="btnRecenter">重置为中心</button>
+      <button class="btn btn-sm btn-outline-secondary" id="btnJudge">聚集判定</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div id="graphChart"></div>
+    <div id="graphEmpty" class="empty-state" style="display:none">
+      <div class="icon">⌘</div>该主体没有关联数据
+    </div>
+  </div>
+</div>
+
+<!-- 节点详情 -->
+<div class="modal fade" id="nodeModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">主体信息</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body"><div class="kv-list" id="nodeKv"></div></div>
+      <div class="modal-footer">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+        <button class="btn btn-sm btn-primary" id="btnSetCenter">设为新中心</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TYPE_COLOR = {
+  "用户": "#2563eb", "设备": "#f59e0b", "IP": "#0891b2",
+  "手机号": "#8b5cf6", "地址": "#64748b",
+};
+const TYPE_SIZE = { "用户": 46, "设备": 38, "IP": 34, "手机号": 34, "地址": 30 };
+
+let chart = null, curData = null, nodeModal = null, pickedNode = null;
+
+function buildOption(data) {
+  const categories = [...new Set(data.nodes.map(n => n.type))].map(t => ({
+    name: t,
+    itemStyle: { color: TYPE_COLOR[t] || "#94a3b8" },
+  }));
+  return {
+    tooltip: {
+      formatter: (p) => p.dataType === "edge"
+        ? `${p.data.relation}`
+        : `<b>${p.data.type}</b>：${p.data.value}<br/>
+           <span style="font-size:11px;color:#94a3b8">第 ${p.data.hop} 跳 · 点击查看详情</span>`,
+    },
+    legend: [{
+      data: categories.map(c => c.name), bottom: 0,
+      itemHeight: 8, textStyle: { fontSize: 11, color: "#475569" },
+    }],
+    animationDuration: 400,
+    series: [{
+      type: "graph", layout: "force", roam: true, draggable: true,
+      categories,
+      data: data.nodes.map(n => ({
+        ...n,
+        symbolSize: n.center ? TYPE_SIZE[n.type] + 16 : TYPE_SIZE[n.type],
+        label: {
+          show: true,
+          formatter: n.value.length > 14 ? n.value.slice(0, 14) + "…" : n.value,
+          fontSize: n.center ? 12 : 10.5,
+          color: "#334155",
+        },
+        itemStyle: n.center
+          ? { borderColor: "#dc2626", borderWidth: 3 }
+          : { borderColor: "#fff", borderWidth: 2 },
+      })),
+      links: data.edges.map(e => ({
+        source: e.source, target: e.target, relation: e.relation,
+        lineStyle: { color: "#cbd5e1", width: 1.4, curveness: 0.12 },
+      })),
+      emphasis: { focus: "adjacency", lineStyle: { width: 3 } },
+      force: { repulsion: 320, edgeLength: [90, 150], gravity: 0.08 },
+    }],
+  };
+}
+
+async function loadGraph() {
+  const et = document.getElementById("gEntityType").value;
+  const ev = document.getElementById("gEntityValue").value.trim();
+  const hops = +document.getElementById("gHops").value;
+  if (!ev) { toast("请输入中心主体值", "err"); return; }
+
+  document.getElementById("gHopsLabel").textContent = hops;
+  document.getElementById("gSubtitle").textContent =
+    `${et} = ${ev} · ${hops} 跳 · 节点 = 主体 · 边 = 关联关系`;
+
+  const data = await api(`/api/graph?entity_type=${encodeURIComponent(et)}` +
+                         `&entity_value=${encodeURIComponent(ev)}&hops=${hops}`);
+  curData = data;
+
+  const users = data.nodes.filter(n => n.type === "用户").length;
+  document.getElementById("gStats").innerHTML = [
+    { label: "节点数", value: data.node_count, icon: "◈" },
+    { label: "关联账号", value: users, icon: "▤" },
+    { label: "关系边", value: data.edge_count, icon: "⌇" },
+    { label: "是否截断", value: data.truncated ? "是" : "否", icon: "✂" },
+  ].map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value" style="font-size:22px">${c.value}</div>
+    </div>`).join("");
+
+  const tip = document.getElementById("gTruncateTip");
+  if (data.truncated) {
+    tip.style.display = "block";
+    tip.innerHTML = `已触发节点上限截断（每跳上限 200）。结果不完整，
+      建议缩小跳数或换一个更具体的中心主体。`;
+  } else if (data.node_count > 100) {
+    tip.style.display = "block";
+    tip.className = "alert alert-info small mb-0";
+    tip.innerHTML = `当前 ${data.node_count} 个节点已超过<b>前端渲染上限 100</b>，
+      视觉上会比较混乱，建议降到 1 跳。`;
+  } else {
+    tip.style.display = "none";
+  }
+
+  const empty = document.getElementById("graphEmpty");
+  if (!data.nodes.length) {
+    empty.style.display = "block";
+    if (chart) { chart.dispose(); chart = null; }
+    return;
+  }
+  empty.style.display = "none";
+  chart = initChart("graphChart", buildOption(data)) || chart;
+
+  if (chart) {
+    chart.off("click");
+    chart.on("click", (p) => {
+      if (p.dataType !== "node") return;
+      pickedNode = p.data;
+      document.getElementById("nodeKv").innerHTML = [
+        ["类型", pickedNode.type],
+        ["值", `<code>${pickedNode.value}</code>`],
+        ["跳数", `第 ${pickedNode.hop} 跳`],
+        ["是否中心", pickedNode.center ? "是" : "否"],
+      ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+      nodeModal.show();
+    });
+  }
+}
+
+document.getElementById("btnQuery").addEventListener("click", loadGraph);
+document.getElementById("gEntityValue").addEventListener("keydown", e => {
+  if (e.key === "Enter") loadGraph();
+});
+document.getElementById("gHops").addEventListener("change", loadGraph);
+
+document.getElementById("btnRecenter").addEventListener("click", () => {
+  document.getElementById("gEntityValue").value = "1003";
+  document.getElementById("gHops").value = 2;
+  loadGraph();
+});
+
+document.getElementById("btnJudge").addEventListener("click", async () => {
+  const et = document.getElementById("gEntityType").value;
+  if (et === "用户") { toast("聚集判定请选 设备 / IP / 手机号 / 地址", "err"); return; }
+  const ev = document.getElementById("gEntityValue").value.trim();
+  const r = await api(`/api/graph/related-accounts?entity_type=${encodeURIComponent(et)}` +
+                      `&entity_value=${encodeURIComponent(ev)}&min_accounts=3`);
+  toast(`${et} ${ev} 关联 ${r.account_count} 个账号` +
+        `（阈值 ${r.threshold}）${r.reached_threshold ? "，已达聚集阈值 ⚠" : ""}`,
+        r.reached_threshold ? "err" : "ok");
+});
+
+document.getElementById("btnSetCenter").addEventListener("click", () => {
+  if (!pickedNode) return;
+  document.getElementById("gEntityType").value = pickedNode.type;
+  document.getElementById("gEntityValue").value = pickedNode.value;
+  nodeModal.hide();
+  loadGraph();
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  nodeModal = new bootstrap.Modal(document.getElementById("nodeModal"));
+  // 支持从其他页面带参数跳进来
+  const p = new URLSearchParams(location.search);
+  if (p.get("entity_type")) document.getElementById("gEntityType").value = p.get("entity_type");
+  if (p.get("entity_value")) document.getElementById("gEntityValue").value = p.get("entity_value");
+  loadGraph();
+});
+</script>
+{% endblock %}

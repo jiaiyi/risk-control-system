@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% block title %}案件详情{% endblock %}
+
+{% block content %}
+<div id="detailEmpty" class="card">
+  <div class="card-body empty-state">
+    <div class="spinner-border text-primary"></div> 正在加载案件详情…
+  </div>
+</div>
+
+<div id="detailBox" class="d-none">
+  <div class="detail-grid">
+    <!-- ==================== 左列 ==================== -->
+    <div>
+      <!-- 案件 + 评估 -->
+      <div class="card">
+        <div class="card-header">
+          <div><div class="title">案件信息</div>
+               <div class="subtitle" id="dCaseId"></div></div>
+          <div id="dStatus"></div>
+        </div>
+        <div class="card-body">
+          <div class="kv-list mb-3" id="dCaseKv"></div>
+
+          <div class="row g-3">
+            <div class="col-md-4 text-center">
+              <div style="font-size:30px;font-weight:700" id="dScore">-</div>
+              <div id="dLevel" class="mt-1"></div>
+              <div class="subtitle mt-1">最终评分</div>
+            </div>
+            <div class="col-md-8">
+              <div class="subtitle mb-2">评分链路</div>
+              <div id="dBreakdown" class="sim-step small"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 命中规则 -->
+      <div class="card">
+        <div class="card-header"><div class="title">命中规则明细</div></div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table">
+              <thead><tr><th>规则</th><th>分类</th><th>等级</th><th>分值</th><th>动作</th></tr></thead>
+              <tbody id="dRulesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 特征快照 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="title">特征快照</div>
+          <span class="subtitle" id="dFeatureCount"></span>
+        </div>
+        <div class="card-body">
+          <div id="dFeatures" class="d-flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+
+      <!-- 业务单据 -->
+      <div class="card">
+        <div class="card-header"><div class="title">业务单据</div></div>
+        <div class="card-body">
+          <div id="dBizDoc" class="small"></div>
+        </div>
+      </div>
+
+      <!-- 回写记录 -->
+      <div class="card" id="writebackCard">
+        <div class="card-header"><div class="title">处置回写记录</div></div>
+        <div class="card-body"><div id="dWriteback" class="small"></div></div>
+      </div>
+    </div>
+
+    <!-- ==================== 右列 ==================== -->
+    <div>
+      <!-- 用户画像 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="title">用户画像</div>
+          <a class="subtitle text-decoration-none" id="dProfileLink" href="#">查看完整画像 →</a>
+        </div>
+        <div class="card-body"><div id="dProfile" class="kv-list small"></div></div>
+      </div>
+
+      <!-- 名单履历 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="title">名单履历</div>
+          <a class="subtitle text-decoration-none" href="/lists">去管理 →</a>
+        </div>
+        <div class="card-body"><div id="dListHistory" class="small"></div></div>
+      </div>
+
+      <!-- 审核面板 -->
+      <div class="card" id="reviewCard">
+        <div class="card-header"><div class="title">审核处置</div></div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label">处置结论</label>
+            <select class="form-select form-select-sm" id="rvDecision">
+              <option value="已拒绝">已拒绝</option>
+              <option value="已通过">已通过</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">审核意见</label>
+            <textarea class="form-control form-control-sm" id="rvComment" rows="3"
+                      placeholder="填写判定依据"></textarea>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="rvAddBlack">
+            <label class="form-check-label small" for="rvAddBlack">
+              同时将主体加入黑名单
+            </label>
+          </div>
+          <div class="mb-3" id="rvTypesBox" style="display:none">
+            <label class="form-label small">加入黑名单的主体类型</label>
+            <div class="d-flex flex-wrap gap-2" id="rvTypes"></div>
+          </div>
+          <button class="btn btn-primary w-100" id="btnReview">提交审核</button>
+          <div class="subtitle mt-2" style="font-size:11.5px">
+            处置回写与案件状态更新在同一事务；回写失败则案件状态不推进。
+          </div>
+        </div>
+      </div>
+
+      <!-- 重做检查 -->
+      <div class="card">
+        <div class="card-header"><div class="title">重做检查</div></div>
+        <div class="card-body">
+          <button class="btn btn-outline-secondary w-100 btn-sm" id="btnRedo">
+            用同样的参数重新发起风控检查
+          </button>
+          <div class="subtitle mt-2" style="font-size:11.5px">
+            带上案件的 source_id 与 event_type 跳到检查页
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CASE_ID = "{{ case_id }}";
+
+document.getElementById("rvAddBlack").addEventListener("change", (e) => {
+  document.getElementById("rvTypesBox").style.display = e.target.checked ? "block" : "none";
+});
+document.getElementById("rvTypes").innerHTML =
+  ["用户", "设备", "IP", "手机号", "地址"].map(t =>
+    `<span class="badge badge-gray" style="cursor:pointer" data-t="${t}">${t}</span>`).join("");
+document.getElementById("rvTypes").addEventListener("click", (e) => {
+  const chip = e.target.closest("span[data-t]");
+  if (!chip) return;
+  chip.className = chip.className.includes("badge-gray")
+    ? "badge badge-black" : "badge badge-gray";
+});
+
+(async () => {
+  const d = await api(`/api/cases/${CASE_ID}`);
+  document.getElementById("detailEmpty").classList.add("d-none");
+  document.getElementById("detailBox").classList.remove("d-none");
+
+  const c = d.case;
+  document.getElementById("dCaseId").textContent = c.case_id;
+  document.getElementById("dStatus").innerHTML =
+    `<span class="badge ${c.case_status === "待审核" ? "badge-review" : "badge-gray"}">${c.case_status}</span>`;
+
+  document.getElementById("dCaseKv").innerHTML = [
+    ["用户", `<a href="/cases?user_id=${c.user_id}">${c.user_id}</a>`],
+    ["事件类型", c.event_type || "-"],
+    ["业务 ID", `<code>${c.source_id || "-"}</code>`],
+    ["案件分类", c.case_category || "-"],
+    ["名单冲突", c.conflict_flag ? '<span class="badge badge-reject">是</span>' : "否"],
+    ["审核人", c.reviewer || "-"],
+    ["审核时间", c.review_time || "-"],
+    ["创建时间", c.create_time || "-"],
+  ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+
+  const a = d.assessment || {};
+  document.getElementById("dScore").textContent = a.final_score ?? "-";
+  document.getElementById("dScore").style.color =
+    (a.final_score ?? 0) >= 80 ? "var(--c-danger)" : (a.final_score ?? 0) >= 60 ? "#ea580c" : "var(--c-warning)";
+  document.getElementById("dLevel").innerHTML = levelBadge(a.risk_level);
+
+  const b = d.score_breakdown || {};
+  document.getElementById("dBreakdown").innerHTML = [
+    `① max(命中分值) = <b>${b.max_rule_score ?? 0}</b>`,
+    `② 多规则加分 = <b>+${b.multi_rule_bonus ?? 0}</b>`,
+    `③ 灰名单加严 = <b>+${b.graylist_bonus ?? 0}</b>${d.graylist_hit ? "（命中）" : ""}`,
+    `④ 一票否决 = <b>${b.veto ? "触发" : "未触发"}</b>`,
+    `⑤ 最终评分 = <b>${b.final_score ?? a.final_score}</b>`,
+  ].map(s => `<div class="mb-1">${s}</div>`).join("");
+
+  document.getElementById("dRulesBody").innerHTML = (d.triggered_rules || []).length
+    ? d.triggered_rules.map(t => `
+        <tr>
+          <td><a href="/rules/${t.rule_id}" class="text-decoration-none"><b>${t.rule_id}</b></a>
+              <div class="text-muted" style="font-size:11.5px">${t.rule_name}</div></td>
+          <td>${t.rule_category}</td><td>${levelBadge(t.risk_level)}</td>
+          <td><b>${t.risk_score}</b></td><td>${t.action}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="5" class="empty-state">无命中规则</td></tr>`;
+
+  const feats = d.features || [];
+  document.getElementById("dFeatureCount").textContent = `${feats.length} 条`;
+  document.getElementById("dFeatures").innerHTML = feats.length
+    ? feats.map(f => `<span class="badge badge-gray" title="${f.entity_type}:${f.entity_id}">
+        ${f.feature_name} = <b>${f.feature_value}</b></span>`).join("")
+    : `<span class="text-muted">该案件无特征快照（可能走了名单短路路径）</span>`;
+
+  const biz = d.business_doc;
+  document.getElementById("dBizDoc").innerHTML = biz
+    ? `<div class="kv-list">${Object.entries(biz)
+        .filter(([k]) => k !== "type")
+        .map(([k, v]) => `<div class="k">${k}</div><div class="v">${v ?? "-"}</div>`).join("")}</div>`
+    : `<span class="text-muted">未关联到业务单据</span>`;
+
+  const wb = d.writeback;
+  document.getElementById("dWriteback").innerHTML = wb
+    ? `<div class="kv-list">
+        <div class="k">动作</div><div class="v">${wb.action || "-"}</div>
+        <div class="k">目标</div><div class="v"><code>${wb.target || "-"}</code></div>
+        <div class="k">状态变更</div><div class="v">${wb.from_status || "-"} → ${wb.to_status || "-"}</div>
+        <div class="k">影响行数</div><div class="v">${wb.affected_rows ?? 0}</div>
+        <div class="k">结果</div><div class="v">${wb.success
+          ? '<span class="badge badge-pass">成功</span>'
+          : '<span class="badge badge-reject">失败</span>'}</div>
+       </div>
+       ${wb.error ? `<div class="text-danger mt-2">${wb.error}</div>` : ""}`
+    : `<span class="text-muted">尚未审核，无回写记录</span>`;
+
+  const p = d.profile;
+  document.getElementById("dProfileLink").href = `/api/profile/${c.user_id}`;
+  document.getElementById("dProfile").innerHTML = p
+    ? [
+        ["风险评分", `<b>${p.risk_score}</b> ${levelBadge(p.risk_level)}`],
+        ["总订单数", p.total_orders],
+        ["退款率", (p.refund_rate * 100).toFixed(1) + "%"],
+        ["投诉次数", p.complaint_count],
+        ["评估次数", p.assessment_count],
+      ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join("")
+    : `<span class="text-muted">无画像数据</span>`;
+
+  const lh = d.related_entities;
+  document.getElementById("dListHistory").innerHTML = `
+    <div class="text-muted">关联主体分析由图谱页提供（T-14），
+      <a href="/graph?entity_type=用户&entity_value=${c.user_id}">去图谱查看 ${c.user_id}</a>
+    </div>`;
+
+  // 已终结的案件隐藏审核面板
+  if (!["待审核", "审核中"].includes(c.case_status)) {
+    document.getElementById("reviewCard").innerHTML = `
+      <div class="card-header"><div class="title">审核处置</div></div>
+      <div class="card-body">
+        <div class="alert alert-secondary mb-0 small">
+          该案件已终结（${c.case_status}），不可重复处置。
+        </div>
+      </div>`;
+  }
+})();
+
+document.getElementById("btnReview").addEventListener("click", async () => {
+  const btn = document.getElementById("btnReview");
+  btn.disabled = true; btn.textContent = "提交中…";
+  const types = [...document.querySelectorAll("#rvTypes .badge-black")].map(e => e.dataset.t);
+  try {
+    const r = await api(`/api/cases/${CASE_ID}/review`, {
+      method: "POST",
+      body: JSON.stringify({
+        decision: document.getElementById("rvDecision").value,
+        reviewer: "web_reviewer",
+        review_comment: document.getElementById("rvComment").value.trim(),
+        add_to_blacklist: document.getElementById("rvAddBlack").checked,
+        blacklist_entity_types: types.length ? types : null,
+      }),
+    });
+    toast(`审核完成：${r.case_status}；${r.writeback.action || "无回写动作"}`);
+    setTimeout(() => location.reload(), 900);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "提交审核";
+  }
+});
+
+document.getElementById("btnRedo").addEventListener("click", () => {
+  const src = document.getElementById("dCaseKv").querySelector("code")?.textContent || "";
+  const et = [...document.querySelectorAll("#dCaseKv .v")]
+    .map(e => e.textContent).find(t => ["登录", "营销领券", "下单", "支付", "售后申请", "物流投诉"].includes(t)) || "登录";
+  location.href = `/risk-check?source_id=${encodeURIComponent(src)}&event_type=${encodeURIComponent(et)}`;
+});
+</script>
+{% endblock %}

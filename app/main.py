@@ -32,6 +32,7 @@ from app.api import (
     rules,
     simulation,
 )
+from app.api import pages as pages_api
 from app.api import settings as settings_api
 from app.config import settings
 from app.errors import ServiceError
@@ -138,6 +139,9 @@ def health() -> dict:
 # 路由注册（SPEC 6.1 接口清单）
 # ----------------------------------------------------------------------
 API_PREFIX = "/api"
+
+# 页面路由无 /api 前缀，必须最先注册，否则 /cases/{case_id} 会被 API 路由抢先匹配
+app.include_router(pages_api.router)                     # API-30~37 + 2 个子页
 
 app.include_router(risk.router, prefix=API_PREFIX)                  # API-01
 app.include_router(rules.router, prefix=API_PREFIX)                 # API-02~08

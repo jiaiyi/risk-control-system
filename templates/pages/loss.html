@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}资损防护{% endblock %}
+
+{% block content %}
+<div class="kpi-grid" id="lossKpi"></div>
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card mb-0">
+      <div class="card-header">
+        <div><div class="title">拦截趋势</div>
+             <div class="subtitle">被拒绝案件的逐日数量</div></div>
+        <select class="form-select form-select-sm w-auto" id="lossDays">
+          <option value="7">近 7 天</option>
+          <option value="14">近 14 天</option>
+          <option value="30">近 30 天</option>
+        </select>
+      </div>
+      <div class="card-body"><div id="lossChart" class="chart chart-lg"></div></div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card mb-0">
+      <div class="card-header"><div class="title">资损口径说明</div></div>
+      <div class="card-body small text-muted">
+        <p><b>预估找回资损</b> = 被拒绝案件的关联订单实付金额合计
+        （<code>risk_case.source_id → order_info → order_detail.final_amount</code>）。</p>
+        <p>只统计<b>下单 / 支付</b>类事件且决策为「拒绝」的案件 ——
+        登录、领券等事件不直接对应订单金额。</p>
+        <p class="mb-0">回写「已支付未发货」的订单时，系统会转入退款流程而非直接退款，
+        因此这里的金额是<b>被拦下的潜在损失</b>，不是实际追回金额。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function loadLoss() {
+  const days = +$("lossDays").value;
+  const d = await api(`/api/dashboard/loss-prevention?days=${days}`);
+
+  $("lossKpi").innerHTML = [
+    { label: "拦截案件数", value: d.blocked_cases, icon: "◈" },
+    { label: "涉及账号数", value: d.blocked_users, icon: "▤" },
+    { label: "预估找回资损", value: "¥" + Math.round(d.blocked_amount).toLocaleString("zh-CN"), icon: "¥" },
+  ].map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value">${c.value}</div>
+    </div>`).join("");
+
+  const tr = d.trend || [];
+  initChart("lossChart", lineOption(
+    tr.map(d => d.date.slice(5)),
+    [{ name: "拦截案件数", data: tr.map(d => d.cases), itemStyle: { color: "#dc2626" } }],
+  ));
+}
+
+$("lossDays").addEventListener("change", loadLoss);
+loadLoss();
+</script>
+{% endblock %}

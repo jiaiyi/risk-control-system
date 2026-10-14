@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}案件管理{% endblock %}
+
+{% block content %}
+<div class="kpi-grid" id="caseStats"></div>
+
+<div class="card">
+  <div class="card-header flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <select class="form-select form-select-sm w-auto" id="fStatus">
+        <option value="">全部状态</option>
+        <option>待审核</option><option>审核中</option>
+        <option>已通过</option><option>已拒绝</option><option>已关闭</option>
+      </select>
+      <select class="form-select form-select-sm w-auto" id="fCategory">
+        <option value="">全部分类</option>
+      </select>
+      <input class="form-control form-control-sm" id="fUserId" placeholder="用户 ID"
+             style="width:130px">
+      <div class="form-check ms-1 mb-0">
+        <input class="form-check-input" type="checkbox" id="fConflict">
+        <label class="form-check-label small" for="fConflict">仅看名单冲突</label>
+      </div>
+      <button class="btn btn-sm btn-outline-secondary" id="btnSearch">查询</button>
+    </div>
+  </div>
+
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr>
+          <th>案件号</th><th>用户</th><th>事件</th><th>分类</th>
+          <th>冲突</th><th>状态</th><th>审核人</th><th>创建时间</th>
+        </tr></thead>
+        <tbody id="caseBody">
+          <tr><td colspan="8" class="empty-state">
+            <div class="spinner-border text-primary"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card-header border-top border-bottom-0">
+    <div class="subtitle" id="pageInfo">-</div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" id="btnPrev">上一页</button>
+      <button class="btn btn-sm btn-outline-secondary" id="btnNext">下一页</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATEGORIES = ["订单欺诈", "支付风险", "账户风险", "售后滥用", "地址风险",
+                    "物流风险", "登录安全", "营销薅羊毛", "黄牛囤货", "聚集风险", "未知"];
+const STATUS_BADGE = {
+  "待审核": "badge-review", "审核中": "badge-challenge",
+  "已通过": "badge-pass", "已拒绝": "badge-reject", "已关闭": "badge-gray",
+};
+
+let page = 1, pageSize = 20, total = 0;
+
+// URL 参数带入（从仪表盘全局搜索跳转过来）
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.get("user_id")) document.getElementById("fUserId").value = urlParams.get("user_id");
+if (urlParams.get("case_id")) document.getElementById("fUserId").placeholder = "案件号 / 用户 ID";
+
+document.getElementById("fCategory").innerHTML =
+  '<option value="">全部分类</option>' + CATEGORIES.map(c => `<option>${c}</option>`).join("");
+
+function buildQuery() {
+  return new URLSearchParams({
+    page, page_size: pageSize,
+    case_status: document.getElementById("fStatus").value,
+    case_category: document.getElementById("fCategory").value,
+    user_id: document.getElementById("fUserId").value.trim(),
+    conflict_only: document.getElementById("fConflict").checked,
+  }).toString();
+}
+
+async function loadCases() {
+  const data = await api("/api/cases?" + buildQuery());
+  total = data.total;
+  const body = document.getElementById("caseBody");
+  if (!data.items.length) {
+    body.innerHTML = `<tr><td colspan="8" class="empty-state">
+      <div class="icon">◈</div>没有符合条件的案件</td></tr>`;
+  } else {
+    body.innerHTML = data.items.map(c => `
+      <tr>
+        <td><a href="/cases/${c.case_id}" class="text-decoration-none"><b>${c.case_id.slice(0, 16)}…</b></a></td>
+        <td><a href="/cases?user_id=${c.user_id}" class="text-decoration-none">${c.user_id}</a></td>
+        <td><span class="badge badge-gray">${c.event_type || "-"}</span></td>
+        <td>${c.case_category || "-"}</td>
+        <td>${c.conflict_flag
+              ? '<span class="badge badge-reject">名单冲突</span>'
+              : '<span class="text-muted">-</span>'}</td>
+        <td><span class="badge ${STATUS_BADGE[c.case_status] || "badge-gray"}">${c.case_status}</span></td>
+        <td>${c.reviewer || '<span class="text-muted">-</span>'}</td>
+        <td style="font-size:12px">${(c.create_time || "").replace("T", " ")}</td>
+      </tr>`).join("");
+  }
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  document.getElementById("pageInfo").textContent = `共 ${total} 条 · 第 ${page} / ${pages} 页`;
+  document.getElementById("btnPrev").disabled = page <= 1;
+  document.getElementById("btnNext").disabled = page >= pages;
+}
+
+async function loadStats() {
+  const s = await api("/api/cases/statistics");
+  const by = s.by_status || {};
+  document.getElementById("caseStats").innerHTML = [
+    { label: "案件总数", value: s.total, icon: "◈" },
+    { label: "待审核", value: by["待审核"] || 0, icon: "⏳" },
+    { label: "审核中", value: by["审核中"] || 0, icon: "◐" },
+    { label: "已拒绝", value: by["已拒绝"] || 0, icon: "⛔" },
+    { label: "名单冲突", value: s.conflict_cases, icon: "⚠" },
+  ].map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value">${c.value}</div>
+    </div>`).join("");
+}
+
+document.getElementById("btnSearch").addEventListener("click", () => { page = 1; loadCases(); });
+["fStatus", "fCategory", "fConflict"].forEach(id =>
+  document.getElementById(id).addEventListener("change", () => { page = 1; loadCases(); }));
+document.getElementById("fUserId").addEventListener("keydown", e => {
+  if (e.key === "Enter") { page = 1; loadCases(); }
+});
+document.getElementById("btnPrev").addEventListener("click", () => { if (page > 1) { page--; loadCases(); } });
+document.getElementById("btnNext").addEventListener("click", () => { page++; loadCases(); });
+
+loadStats(); loadCases();
+</script>
+{% endblock %}

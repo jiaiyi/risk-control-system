@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}规则编辑{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <div class="title">规则要素</div>
+        <span class="subtitle" id="modeTag">-</span>
+      </div>
+      <div class="card-body">
+        <form id="ruleForm">
+          <input type="hidden" id="ruleId">
+
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">规则名称 <span class="text-danger">*</span></label>
+              <input class="form-control" id="ruleName" required maxlength="100">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">风险场景 <span class="text-danger">*</span></label>
+              <select class="form-select" id="ruleCategory" required></select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">适用事件 <span class="text-danger">*</span></label>
+              <select class="form-select" id="ruleEventType" required></select>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">条件表达式（JSON）<span class="text-danger">*</span></label>
+              <textarea class="form-control font-monospace" id="ruleCondition" rows="6"
+                        style="font-size:12.5px"
+                        placeholder='{"field": "user_total_orders", "op": "&gt;=", "value": 10}'></textarea>
+              <div class="d-flex align-items-center gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnValidate">
+                  校验条件
+                </button>
+                <span id="validateMsg" class="small"></span>
+              </div>
+              <div class="subtitle mt-1" style="font-size:11.5px">
+                支持 9 个比较符（&gt; &gt;= &lt; &lt;= == != in not_in between）+ 2 个逻辑符（and or，可嵌套）；
+                特征不存在判定为不命中，未知运算符判定为不命中并记警告。
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">风险等级 <span class="text-danger">*</span></label>
+              <select class="form-select" id="riskLevel" required>
+                <option>低</option><option selected>中</option><option>高</option><option>极高</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">命中分值（0-100）<span class="text-danger">*</span></label>
+              <input type="number" class="form-control" id="riskScore" min="0" max="100" value="40" required>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">触发动作 <span class="text-danger">*</span></label>
+              <select class="form-select" id="action" required>
+                <option>通过</option><option selected>标记</option><option>人工审核</option>
+                <option>二次验证</option><option>拒绝</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">优先级（越高越先）</label>
+              <input type="number" class="form-control" id="priority" min="0" max="999" value="50">
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">规则描述</label>
+              <textarea class="form-control" id="description" rows="2"
+                        placeholder="说明这条规则要拦什么、为什么这么定"></textarea>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary" id="btnSave">保存</button>
+            <a href="/rules" class="btn btn-outline-secondary">取消</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 实时预览 ==================== -->
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header"><div class="title">条件示例</div></div>
+      <div class="card-body small">
+        <p class="mb-2 text-muted">单条件：</p>
+        <pre class="bg-light p-2 rounded small mb-3">{
+  "field": "login_fail_count_1h",
+  "op": "&gt;=",
+  "value": 5
+}</pre>
+        <p class="mb-2 text-muted">and 组合：</p>
+        <pre class="bg-light p-2 rounded small mb-3">{
+  "and": [
+    {"field": "login_is_new_device", "op": "==", "value": 1},
+    {"field": "login_city_count_7d", "op": "&gt;=", "value": 3}
+  ]
+}</pre>
+        <p class="mb-2 text-muted">in / between：</p>
+        <pre class="bg-light p-2 rounded small mb-0">{
+  "field": "order_total_amount",
+  "op": "between",
+  "value": [2000, 5000]
+}</pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="title">保存后会发生什么</div></div>
+      <div class="card-body small text-muted">
+        <ul class="mb-0 ps-3">
+          <li>规则缓存立即失效（<code>NFR-17</code> 热更新）</li>
+          <li>下一次风控检查就用新配置</li>
+          <li>新增 / 修改都会写审计流水</li>
+          <li>删除是<b>逻辑删除</b>，历史案件的命中记录仍可追溯</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATEGORIES = ["订单欺诈", "支付风险", "账户风险", "售后滥用", "地址风险",
+                    "物流风险", "登录安全", "营销薅羊毛", "黄牛囤货", "聚集风险"];
+const EVENT_TYPES = ["登录", "营销领券", "下单", "支付", "售后申请", "物流投诉", "通用"];
+const RULE_ID = "{{ rule_id or '' }}";
+const IS_NEW = !RULE_ID;
+
+document.getElementById("ruleCategory").innerHTML =
+  CATEGORIES.map(c => `<option>${c}</option>`).join("");
+document.getElementById("ruleEventType").innerHTML =
+  EVENT_TYPES.map(c => `<option>${c}</option>`).join("");
+document.getElementById("modeTag").textContent = IS_NEW ? "新建模式" : `编辑 ${RULE_ID}（部分更新）`;
+
+if (IS_NEW) {
+  document.getElementById("ruleCondition").value =
+    '{"field": "user_total_orders", "op": ">=", "value": 10}';
+} else {
+  api(`/api/rules/${RULE_ID}`).then(r => {
+    document.getElementById("ruleName").value = r.rule_name;
+    document.getElementById("ruleCategory").value = r.rule_category;
+    document.getElementById("ruleEventType").value = r.event_type;
+    document.getElementById("ruleCondition").value =
+      JSON.stringify(r.condition_parsed, null, 2);
+    document.getElementById("riskLevel").value = r.risk_level;
+    document.getElementById("riskScore").value = r.risk_score;
+    document.getElementById("action").value = r.action;
+    document.getElementById("priority").value = r.priority;
+    document.getElementById("description").value = r.description || "";
+  });
+}
+
+function parseCondition() {
+  const raw = document.getElementById("ruleCondition").value.trim();
+  try { return { ok: true, value: JSON.parse(raw) }; }
+  catch (e) { return { ok: false, error: "JSON 解析失败：" + e.message }; }
+}
+
+document.getElementById("btnValidate").addEventListener("click", async () => {
+  const msg = document.getElementById("validateMsg");
+  const parsed = parseCondition();
+  if (!parsed.ok) { msg.className = "small text-danger"; msg.textContent = parsed.error; return; }
+  const r = await api("/api/rules/validate", {
+    method: "POST", body: JSON.stringify({ rule_condition: parsed.value }),
+  });
+  msg.className = `small ${r.valid ? "text-success" : "text-danger"}`;
+  msg.textContent = r.valid ? "✓ 条件合法" : "✗ " + r.message;
+});
+
+document.getElementById("ruleForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const parsed = parseCondition();
+  if (!parsed.ok) { toast(parsed.error, "err"); return; }
+
+  const payload = {
+    rule_name: document.getElementById("ruleName").value.trim(),
+    rule_category: document.getElementById("ruleCategory").value,
+    event_type: document.getElementById("ruleEventType").value,
+    rule_condition: parsed.value,
+    risk_level: document.getElementById("riskLevel").value,
+    risk_score: +document.getElementById("riskScore").value,
+    action: document.getElementById("action").value,
+    priority: +document.getElementById("priority").value,
+    description: document.getElementById("description").value.trim(),
+  };
+
+  const btn = document.getElementById("btnSave");
+  btn.disabled = true; btn.textContent = "保存中…";
+  try {
+    if (IS_NEW) {
+      await api("/api/rules", { method: "POST", body: JSON.stringify(payload) });
+      toast("规则已创建");
+      location.href = "/rules";
+    } else {
+      await api(`/api/rules/${RULE_ID}`, { method: "PUT", body: JSON.stringify(payload) });
+      toast("规则已更新，下一次检查立即生效");
+      location.href = "/rules";
+    }
+  } catch (err) {
+    btn.disabled = false; btn.textContent = "保存";
+  }
+});
+</script>
+{% endblock %}

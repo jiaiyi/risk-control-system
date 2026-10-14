@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+{% block title %}系统配置{% endblock %}
+
+{% block content %}
+<ul class="nav nav-tabs mb-3" id="cfgTabs">
+  <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabThreshold">决策阈值</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabCache">缓存与降级</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabHealth">健康度</a></li>
+  <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabTasks">运维任务</a></li>
+</ul>
+
+<div class="tab-content">
+  <!-- ==================== 决策阈值 ==================== -->
+  <div class="tab-pane fade show active" id="tabThreshold">
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="card mb-0">
+          <div class="card-header">
+            <div><div class="title">决策阈值与引擎参数</div>
+                 <div class="subtitle">变更即时生效，并持久化 + 写审计（FR-56）</div></div>
+            <button class="btn btn-sm btn-primary" id="btnSaveThreshold">保存</button>
+          </div>
+          <div class="card-body">
+            <div class="row g-3" id="thresholdForm"></div>
+            <div class="alert alert-warning small mt-3 mb-0">
+              三个分界点必须满足 <b>通过 ≤ 标记 ≤ 人工审核</b>，否则决策映射会出现空档；
+              后端会做顺序校验并拒绝非法组合。
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="card mb-0">
+          <div class="card-header"><div class="title">当前运行时覆盖项</div></div>
+          <div class="card-body"><div id="overrideList" class="small"></div></div>
+        </div>
+        <div class="card mb-0">
+          <div class="card-header"><div class="title">这些参数怎么用</div></div>
+          <div class="card-body small text-muted">
+            <ul class="mb-0 ps-3">
+              <li><b>通过 / 标记 / 人工审核</b>：四档决策的分界点（30 / 60 / 80）</li>
+              <li><b>多规则加分</b>：每多命中一条规则加多少分（默认 3）</li>
+              <li><b>一票否决最低分</b>：命中「极高」等级规则时抬到的分数（默认 90）</li>
+              <li><b>灰名单加严</b>：命中灰名单时的加分（默认 15）</li>
+              <li><b>画像 α</b>：动态衰减系数，按用户活跃度分档取值</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 缓存与降级 ==================== -->
+  <div class="tab-pane fade" id="tabCache">
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="card mb-0">
+          <div class="card-header">
+            <div><div class="title">缓存与降级策略</div>
+                 <div class="subtitle">NFR-14：缓存故障不得阻断风控主链路</div></div>
+            <button class="btn btn-sm btn-primary" id="btnSaveCache">保存</button>
+          </div>
+          <div class="card-body">
+            <div class="row g-3" id="cacheForm"></div>
+            <div class="alert alert-info small mt-3 mb-0">
+              关闭 Redis 开关后，所有查询直连数据库（<b>降级</b>），
+              风控检查仍能正常完成，只是慢一些。订单 / 商品维度特征本就禁止缓存。
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="card mb-0">
+          <div class="card-header"><div class="title">缓存命中率</div></div>
+          <div class="card-body">
+            <div id="cacheHitChart" class="chart chart-md"></div>
+            <div class="kv-list small mt-2" id="cacheKv"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 健康度 ==================== -->
+  <div class="tab-pane fade" id="tabHealth">
+    <div class="kpi-grid" id="healthKpi"></div>
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="card mb-0">
+          <div class="card-header">
+            <div class="title">接口耗时分解（P95）</div>
+            <button class="btn btn-sm btn-outline-secondary" id="btnResetPerf">重置采样</button>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead><tr><th>路径</th><th>调用次数</th><th>P95 (ms)</th><th>均值 (ms)</th><th>错误</th></tr></thead>
+                <tbody id="perfBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card mb-0">
+          <div class="card-header"><div class="title">依赖与引擎状态</div></div>
+          <div class="card-body"><div id="depKv" class="kv-list small"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 运维任务 ==================== -->
+  <div class="tab-pane fade" id="tabTasks">
+    <div class="card mb-0">
+      <div class="card-header">
+        <div><div class="title">运维任务</div>
+             <div class="subtitle">手动触发后即时执行，并写审计流水</div></div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead><tr><th>任务</th><th>说明</th><th class="text-end">操作</th></tr></thead>
+            <tbody id="taskBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+
+const THRESHOLD_FIELDS = [
+  { key: "RISK_PASS_THRESHOLD", label: "通过阈值", min: 0, max: 100, hint: "低于此分 → 通过" },
+  { key: "RISK_MARK_THRESHOLD", label: "标记阈值", min: 0, max: 100, hint: "低于此分 → 标记" },
+  { key: "RISK_REVIEW_THRESHOLD", label: "人工审核阈值", min: 0, max: 100, hint: "低于此分 → 人工审核/二次验证；≥ 此分 → 拒绝" },
+  { key: "RISK_MULTI_RULE_BONUS", label: "多规则加分", min: 0, max: 20, hint: "每多命中一条规则的分值" },
+  { key: "RISK_VETO_MIN_SCORE", label: "一票否决最低分", min: 0, max: 100, hint: "命中「极高」等级规则时抬到该分" },
+  { key: "RISK_GRAYLIST_BONUS", label: "灰名单加严", min: 0, max: 50, hint: "命中灰名单时的加分" },
+  { key: "PROFILE_ALPHA_HIGH", label: "α · 高活跃", min: 0, max: 1, step: 0.1, hint: "近 30 天订单 ≥ 5" },
+  { key: "PROFILE_ALPHA_MID", label: "α · 中活跃", min: 0, max: 1, step: 0.1, hint: "近 30 天订单 1~4" },
+  { key: "PROFILE_ALPHA_LOW", label: "α · 低活跃", min: 0, max: 1, step: 0.1, hint: "近 30 天订单 = 0" },
+  { key: "PROFILE_ACTIVE_THRESHOLD", label: "活跃度判定线", min: 0, max: 100, hint: "近 30 天订单数达到该值算高活跃" },
+];
+const CACHE_FIELDS = [
+  { key: "REDIS_ENABLED", label: "Redis 开关", type: "bool", hint: "关闭则全量降级直查数据库" },
+  { key: "CACHE_TTL_FEATURE", label: "特征缓存 TTL（秒）", min: 0, max: 86400, hint: "用户/地址/登录/领券/设备/IP 维度" },
+  { key: "CACHE_TTL_PROFILE", label: "画像缓存 TTL（秒）", min: 0, max: 86400, hint: "" },
+  { key: "CACHE_TTL_GRAPH", label: "图谱缓存 TTL（秒）", min: 0, max: 86400, hint: "" },
+  { key: "CACHE_TTL_RULE", label: "规则缓存 TTL（秒）", min: 0, max: 86400, hint: "" },
+];
+
+function renderForm(container, fields, values) {
+  $(container).innerHTML = fields.map(f => {
+    const v = values[f.key];
+    const input = f.type === "bool"
+      ? `<select class="form-select form-select-sm" id="f_${f.key}">
+           <option value="true" ${v ? "selected" : ""}>开启</option>
+           <option value="false" ${!v ? "selected" : ""}>关闭</option>
+         </select>`
+      : `<input type="number" class="form-control form-control-sm" id="f_${f.key}"
+           value="${v ?? ""}" min="${f.min}" max="${f.max}" ${f.step ? `step="${f.step}"` : ""}>`;
+    return `<div class="col-md-6">
+      <label class="form-label small">${f.label}</label>
+      ${input}
+      <div class="subtitle" style="font-size:11px">${f.hint}</div>
+    </div>`;
+  }).join("");
+}
+
+function collect(container, fields) {
+  const out = {};
+  fields.forEach(f => {
+    const el = $("f_" + f.key);
+    if (!el) return;
+    out[f.key] = f.type === "bool" ? (el.value === "true") : +el.value;
+  });
+  return out;
+}
+
+async function loadThresholds() {
+  const d = await api("/api/settings/thresholds");
+  renderForm("thresholdForm", THRESHOLD_FIELDS, d.thresholds);
+  const ov = await api("/api/settings/runtime-overrides");
+  $("overrideList").innerHTML = Object.keys(ov.overrides || {}).length
+    ? `<div class="kv-list">${Object.entries(ov.overrides).map(([k, v]) =>
+        `<div class="k">${k}</div><div class="v"><code>${v}</code></div>`).join("")}</div>`
+    : `<span class="text-muted">当前无覆盖项，全部使用 .env 默认值</span>`;
+}
+
+$("btnSaveThreshold").addEventListener("click", async () => {
+  await api("/api/settings/thresholds", {
+    method: "PUT", body: JSON.stringify(collect("thresholdForm", THRESHOLD_FIELDS)),
+  });
+  toast("阈值已保存，即时生效并写入审计");
+  loadThresholds();
+});
+
+async function loadCache() {
+  const d = await api("/api/settings/cache-policy");
+  renderForm("cacheForm", CACHE_FIELDS, d);
+
+  const m = await api("/api/health/metrics");
+  const c = m.cache;
+  const hit = c.get_hit || 0, miss = c.get_miss || 0, total = hit + miss;
+  const rate = total ? hit / total : 0;
+  initChart("cacheHitChart", {
+    series: [{
+      type: "gauge", startAngle: 210, endAngle: -30, min: 0, max: 100,
+      progress: { show: true, width: 14 },
+      axisLine: { lineStyle: { width: 14, color: [[1, "#e2e8f0"]] } },
+      pointer: { show: false },
+      detail: { valueAnimation: true, fontSize: 24, offsetCenter: [0, "-4%"],
+                formatter: (v) => v.toFixed(1) + "%" },
+      data: [{ value: +(rate * 100).toFixed(1) }],
+    }],
+  });
+  $("cacheKv").innerHTML = [
+    ["可用性", c.available ? '<span class="badge badge-pass">可用</span>' : '<span class="badge badge-reject">不可用（已降级）</span>'],
+    ["本进程命中", `${hit} 次`],
+    ["本进程未命中", `${miss} 次`],
+    ["写入次数", `${c.set || 0} 次`],
+    ["Redis 实例键数", `${c.keys ?? "-"}`],
+  ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+}
+
+$("btnSaveCache").addEventListener("click", async () => {
+  await api("/api/settings/cache-policy", {
+    method: "PUT", body: JSON.stringify(collect("cacheForm", CACHE_FIELDS)),
+  });
+  toast("缓存策略已保存");
+  loadCache();
+});
+
+async function loadHealth() {
+  const m = await api("/api/health/metrics");
+  const p = m.performance;
+  $("healthKpi").innerHTML = [
+    { label: "请求数（采样窗口）", value: p.requests, icon: "▤" },
+    { label: "P95 耗时", value: p.p95_ms + " ms", icon: "⏱" },
+    { label: "平均耗时", value: p.avg_ms + " ms", icon: "◷" },
+    { label: "错误率", value: (p.error_rate * 100).toFixed(2) + "%", icon: "⚠" },
+    { label: "MySQL", value: m.dependencies.mysql ? "正常" : "异常", icon: "▮" },
+    { label: "Redis", value: m.dependencies.redis ? "正常" : "降级", icon: "▮" },
+  ].map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value" style="font-size:22px">${c.value}</div>
+    </div>`).join("");
+
+  $("perfBody").innerHTML = Object.entries(p.by_path || {}).map(([path, d]) => `
+    <tr>
+      <td><code style="font-size:11.5px">${path}</code></td>
+      <td>${d.count}</td>
+      <td><b>${d.p95_ms}</b></td>
+      <td>${d.avg_ms}</td>
+      <td>${d.errors ? `<span class="badge badge-reject">${d.errors}</span>` : "-"}</td>
+    </tr>`).join("") || `<tr><td colspan="5" class="empty-state">尚未采集到请求</td></tr>`;
+
+  const e = m.engine || {};
+  $("depKv").innerHTML = [
+    ["规则", `${e.rules?.enabled ?? "-"} / ${e.rules?.total ?? "-"} 启用`],
+    ["画像数", e.profiles?.total ?? "-"],
+    ["高风险画像", e.profiles?.high_risk ?? "-"],
+    ["图谱上限", `${e.graph_limits?.max_hops} 跳 / ${e.graph_limits?.max_nodes} 节点`],
+    ["决策阈值", `${e.thresholds?.pass} / ${e.thresholds?.mark} / ${e.thresholds?.review}`],
+    ["一票否决", e.thresholds?.veto_min_score],
+    ["灰名单加严", `+${e.thresholds?.graylist_bonus}`],
+  ].map(([k, v]) => `<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+}
+
+$("btnResetPerf").addEventListener("click", async () => {
+  await api("/api/health/perf/reset", { method: "POST" });
+  toast("性能采样已重置");
+  loadHealth();
+});
+
+async function loadTasks() {
+  const d = await api("/api/health/tasks");
+  $("taskBody").innerHTML = d.tasks.map(t => `
+    <tr>
+      <td><b>${t.name}</b></td>
+      <td class="text-muted">${t.description || ""}</td>
+      <td class="text-end">
+        <button class="btn btn-sm btn-outline-primary" onclick="runTask('${t.name}', this)">执行</button>
+      </td>
+    </tr>`).join("");
+}
+
+async function runTask(name, btn) {
+  if (!confirm(`确认执行运维任务「${name}」？`)) return;
+  btn.disabled = true; btn.textContent = "执行中…";
+  try {
+    const r = await api(`/api/health/tasks/${encodeURIComponent(name)}/run`, { method: "POST" });
+    toast(`${name} 完成（${r.elapsed_ms}ms）`);
+  } finally {
+    btn.disabled = false; btn.textContent = "执行";
+  }
+}
+
+// 切 tab 时按需加载（健康度数据每次切过去都刷新）
+document.querySelectorAll('#cfgTabs .nav-link').forEach(el =>
+  el.addEventListener("shown.bs.tab", (e) => {
+    const id = e.target.getAttribute("href");
+    if (id === "#tabHealth") loadHealth();
+    if (id === "#tabCache") loadCache();
+  }));
+
+loadThresholds(); loadCache(); loadTasks();
+</script>
+{% endblock %}

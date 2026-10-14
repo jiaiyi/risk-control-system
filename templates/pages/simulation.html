@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}规则仿真{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <!-- ==================== 单条仿真 ==================== -->
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header">
+        <div class="title">单条事件仿真</div>
+        <span class="subtitle">零副作用</span>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">事件类型</label>
+          <select class="form-select" id="simEventType">
+            <option>登录</option><option>营销领券</option><option>下单</option>
+            <option>支付</option><option>售后申请</option><option>物流投诉</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">用户 ID</label>
+          <input class="form-control" id="simUserId" value="1003">
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label">设备标识</label>
+            <input class="form-control" id="simDevice" placeholder="D-XXX">
+          </div>
+          <div class="col-6">
+            <label class="form-label">登录 IP</label>
+            <input class="form-control" id="simIp" placeholder="10.x.x.x">
+          </div>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="simGraylist">
+          <label class="form-check-label small" for="simGraylist">
+            模拟命中灰名单（验证 +15 加严）
+          </label>
+        </div>
+        <button class="btn btn-primary w-100" id="btnSim">开始仿真</button>
+
+        <div class="alert alert-info mt-3 mb-0 small">
+          <b>零副作用</b>：不写 risk_event / risk_feature / risk_assessment / risk_case / risk_user_profile，
+          也不回填 Redis。响应里的 <code>side_effects.db_writes</code> 是<b>实测</b>值，不是声明。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 仿真结果 ==================== -->
+  <div class="col-lg-7">
+    <div id="simEmpty" class="card">
+      <div class="card-body empty-state">
+        <div class="icon">⧉</div>
+        选择用户与事件类型，点「开始仿真」查看分步链路
+      </div>
+    </div>
+
+    <div id="simResult" class="d-none">
+      <!-- 结论 -->
+      <div class="card">
+        <div class="card-body d-flex align-items-center gap-4">
+          <div class="text-center" style="min-width:100px">
+            <div style="font-size:32px;font-weight:700" id="sScore">-</div>
+            <div id="sLevel" class="mt-1"></div>
+          </div>
+          <div class="flex-grow-1">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="small text-muted">决策</span><span id="sDecision"></span>
+            </div>
+            <div class="small text-muted">
+              求值 <b id="sRuleTotal">-</b> 条规则 · 命中 <b id="sRuleCount">-</b> 条 ·
+              特征 <b id="sFeatureCount">-</b> 个 ·
+              <span class="badge badge-pass" id="sSideEffect">零副作用</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分步链路 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="title">分步链路</div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary" id="btnOnlyHit">只看命中</button>
+            <button class="btn btn-sm btn-outline-secondary" id="btnShowAll">看全部</button>
+          </div>
+        </div>
+        <div class="card-body" id="sSteps"></div>
+      </div>
+
+      <!-- 评分链路 -->
+      <div class="card">
+        <div class="card-header"><div class="title">评分链路</div></div>
+        <div class="card-body"><div id="sBreakdown" class="sim-step"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 批量回放 ==================== -->
+<div class="card mt-1">
+  <div class="card-header flex-wrap gap-2">
+    <div><div class="title">批量回放</div>
+         <div class="subtitle">用历史案件作为样本，统计规则命中数与命中率</div></div>
+    <div class="d-flex gap-2 align-items-center">
+      <select class="form-select form-select-sm w-auto" id="replayEventType">
+        <option value="">全部事件</option>
+        <option>登录</option><option>营销领券</option><option>下单</option>
+        <option>支付</option><option>售后申请</option><option>物流投诉</option>
+      </select>
+      <input type="number" class="form-control form-control-sm" id="replayLimit"
+             value="50" min="1" max="500" style="width:90px">
+      <button class="btn btn-sm btn-primary" id="btnReplay">开始回放</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div id="replayEmpty" class="empty-state">
+      <div class="icon">↻</div>点「开始回放」查看规则命中统计
+    </div>
+    <div id="replayResult" class="d-none">
+      <div class="kpi-grid mb-3" id="replayKpi"></div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead><tr><th>规则</th><th>分类</th><th>等级</th><th>命中数</th><th>命中率</th><th>影响用户数</th></tr></thead>
+          <tbody id="replayBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _steps = [];
+
+document.getElementById("btnSim").addEventListener("click", async () => {
+  const btn = document.getElementById("btnSim");
+  btn.disabled = true; btn.textContent = "仿真中…";
+  try {
+    const r = await api("/api/simulation/run", {
+      method: "POST",
+      body: JSON.stringify({
+        event_type: document.getElementById("simEventType").value,
+        user_id: document.getElementById("simUserId").value.trim(),
+        source_id: "WEB-SIM",
+        device_id: document.getElementById("simDevice").value.trim(),
+        login_ip: document.getElementById("simIp").value.trim(),
+        graylist_hit: document.getElementById("simGraylist").checked,
+      }),
+    });
+    renderSim(r);
+  } catch (e) { /* api 已提示 */ }
+  finally { btn.disabled = false; btn.textContent = "开始仿真"; }
+});
+
+function renderSim(r) {
+  document.getElementById("simEmpty").classList.add("d-none");
+  document.getElementById("simResult").classList.remove("d-none");
+  _steps = r.steps;
+
+  document.getElementById("sScore").textContent = r.final_score;
+  document.getElementById("sLevel").innerHTML = levelBadge(r.risk_level);
+  document.getElementById("sDecision").innerHTML = decisionBadge(r.decision);
+  document.getElementById("sRuleTotal").textContent = r.rule_total;
+  document.getElementById("sRuleCount").textContent = r.rule_count;
+  document.getElementById("sFeatureCount").textContent = r.feature_count;
+
+  const se = r.side_effects || {};
+  const tag = document.getElementById("sSideEffect");
+  const zero = (se.db_writes === 0 || se.db_writes === undefined);
+  tag.textContent = zero ? "零副作用（db_writes=0）" : `写入 ${se.db_writes} 行`;
+  tag.className = `badge ${zero ? "badge-pass" : "badge-reject"}`;
+
+  renderSteps(false);
+
+  const b = r.score_breakdown || {};
+  document.getElementById("sBreakdown").innerHTML = [
+    `① max(命中规则分值) = <b>${b.max_rule_score ?? 0}</b>`,
+    `② + 多规则加分 = <b>+${b.multi_rule_bonus ?? 0}</b>`,
+    `③ 灰名单加严 = <b>+${b.graylist_bonus ?? 0}</b>`,
+    `④ 一票否决 = <b>${b.veto ? "触发" : "未触发"}</b>`,
+    `⑤ 最终评分 = <b style="font-size:16px;color:var(--c-primary)">${b.final_score ?? r.final_score}</b>`,
+  ].map(s => `<div class="mb-1">${s}</div>`).join("");
+
+  toast(`仿真完成：${r.decision}（${r.final_score} 分），全程零写入`, "ok");
+}
+
+function renderSteps(onlyHit) {
+  const steps = onlyHit ? _steps.filter(s => s.matched) : _steps;
+  const box = document.getElementById("sSteps");
+  if (!steps.length) {
+    box.innerHTML = `<div class="empty-state">没有命中的规则</div>`;
+    return;
+  }
+  box.innerHTML = steps.map(s => `
+    <div class="sim-step ${s.matched ? "hit" : "miss"} mb-3">
+      <div class="step-title">
+        ${s.matched ? "✓" : "○"} <a href="/rules/${s.rule_id}" class="text-decoration-none">${s.rule_id}</a>
+        ${s.rule_name}
+        <span class="badge ${s.matched ? "badge-reject" : "badge-gray"} ms-1">${s.risk_score} 分</span>
+        <span class="badge badge-gray ms-1">优先级 ${s.priority}</span>
+      </div>
+      <div class="small text-muted mb-1">
+        条件：<code>${JSON.stringify(s.condition)}</code>
+      </div>
+      <div class="small">
+        ${Object.entries(s.actual_values || {}).map(([k, v]) =>
+          `<span class="badge ${s.matched ? "badge-review" : "badge-gray"} me-1">${k} = ${v}</span>`).join("")}
+      </div>
+    </div>`).join("");
+}
+
+document.getElementById("btnOnlyHit").addEventListener("click", () => renderSteps(true));
+document.getElementById("btnShowAll").addEventListener("click", () => renderSteps(false));
+
+document.getElementById("btnReplay").addEventListener("click", async () => {
+  const btn = document.getElementById("btnReplay");
+  btn.disabled = true; btn.textContent = "回放中…";
+  try {
+    const r = await api("/api/simulation/replay", {
+      method: "POST",
+      body: JSON.stringify({
+        limit: +document.getElementById("replayLimit").value,
+        event_type: document.getElementById("replayEventType").value || null,
+        include_detail: false,
+      }),
+    });
+    renderReplay(r);
+  } catch (e) { /* 已提示 */ }
+  finally { btn.disabled = false; btn.textContent = "开始回放"; }
+});
+
+function renderReplay(r) {
+  document.getElementById("replayEmpty").classList.add("d-none");
+  document.getElementById("replayResult").classList.remove("d-none");
+
+  document.getElementById("replayKpi").innerHTML = [
+    { label: "样本数", value: r.sample_count, icon: "◈" },
+    { label: "命中规则数", value: r.rule_stats.length, icon: "≡" },
+    { label: "平均评分", value: r.avg_score, icon: "▤" },
+    { label: "写入行数", value: r.side_effects.db_writes, icon: "⛔" },
+  ].map(c => `
+    <div class="kpi-card">
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-value">${c.value}</div>
+    </div>`).join("");
+
+  document.getElementById("replayBody").innerHTML = r.rule_stats.length
+    ? r.rule_stats.map(s => `
+        <tr>
+          <td><a href="/rules/${s.rule_id}" class="text-decoration-none"><b>${s.rule_id}</b></a>
+              <div class="text-muted" style="font-size:11.5px">${s.rule_name}</div></td>
+          <td>${s.rule_category}</td>
+          <td>${levelBadge(s.risk_level)}</td>
+          <td><b>${s.hit_count}</b></td>
+          <td>${(s.hit_rate * 100).toFixed(1)}%</td>
+          <td>${s.affected_users}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="6" class="empty-state">样本中没有规则命中</td></tr>`;
+
+  toast(`回放完成：${r.sample_count} 个样本，零写入`, "ok");
+}
+</script>
+{% endblock %}

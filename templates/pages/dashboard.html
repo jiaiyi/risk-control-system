@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}仪表盘{% endblock %}
+
+{% block content %}
+<!-- ==================== KPI 卡片 ==================== -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-top"><span class="kpi-label">今日评估量</span><span class="kpi-icon">▤</span></div>
+    <div class="kpi-value" id="kpiAssessments">-</div>
+    <div class="kpi-delta" id="kpiAssessDelta">&nbsp;</div>
+    <div class="kpi-spark" id="sparkAssess"></div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-top"><span class="kpi-label">高风险数</span><span class="kpi-icon">⚠</span></div>
+    <div class="kpi-value" id="kpiHigh">-</div>
+    <div class="kpi-delta" id="kpiHighDelta">&nbsp;</div>
+    <div class="kpi-spark" id="sparkHigh"></div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-top"><span class="kpi-label">待审案件</span><span class="kpi-icon">◈</span></div>
+    <div class="kpi-value" id="kpiPending">-</div>
+    <div class="kpi-delta" id="kpiPendingDelta">&nbsp;</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-top"><span class="kpi-label">通过率</span><span class="kpi-icon">✓</span></div>
+    <div class="kpi-value" id="kpiPassRate">-</div>
+    <div class="kpi-delta" id="kpiPassDelta">&nbsp;</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-top"><span class="kpi-label">拦截率</span><span class="kpi-icon">⛔</span></div>
+    <div class="kpi-value" id="kpiBlockRate">-</div>
+    <div class="kpi-delta" id="kpiBlockDelta">&nbsp;</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-top"><span class="kpi-label">预估找回资损</span><span class="kpi-icon">¥</span></div>
+    <div class="kpi-value" id="kpiLoss">-</div>
+    <div class="kpi-delta" id="kpiLossDelta">&nbsp;</div>
+  </div>
+</div>
+
+<!-- ==================== 趋势 + 分布 ==================== -->
+<div class="row g-3 mb-3">
+  <div class="col-lg-8">
+    <div class="card mb-0 h-100">
+      <div class="card-header">
+        <div><div class="title">近 7 天风险趋势</div>
+             <div class="subtitle">评估量 · 高风险数 · 拦截率</div></div>
+        <select class="form-select form-select-sm w-auto" id="trendDays">
+          <option value="7">近 7 天</option>
+          <option value="14">近 14 天</option>
+          <option value="30">近 30 天</option>
+        </select>
+      </div>
+      <div class="card-body"><div id="chartTrend" class="chart chart-lg"></div></div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card mb-0 h-100">
+      <div class="card-header">
+        <div><div class="title">风险等级分布</div>
+             <div class="subtitle" id="distSubtitle">近 7 天</div></div>
+      </div>
+      <div class="card-body"><div id="chartDist" class="chart chart-lg"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TOP5 + 实时事件流 ==================== -->
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card mb-0 h-100">
+      <div class="card-header">
+        <div><div class="title">规则命中 TOP5</div>
+             <div class="subtitle" id="topSubtitle">近 7 天</div></div>
+      </div>
+      <div class="card-body"><div id="chartTopRules" class="chart chart-md"></div></div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card mb-0 h-100">
+      <div class="card-header">
+        <div><div class="title">实时事件流</div>
+             <div class="subtitle">最近的风控检查记录</div></div>
+        <span class="badge badge-gray" id="realtimeTag"><span class="spinner-border-sm spinner-border"></span> 实时</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead><tr><th>时间</th><th>用户</th><th>事件</th><th>评分</th><th>决策</th></tr></thead>
+            <tbody id="realtimeBody">
+              <tr><td colspan="5" class="empty-state"><div class="spinner-border text-primary"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const LEVEL_COLOR = { "低": "#16a34a", "中": "#d97706", "高": "#ea580c", "极高": "#dc2626" };
+const RULE_COLORS = ["#2563eb", "#f59e0b", "#ef4444", "#0891b2", "#8b5cf6"];
+
+let chartTrend = null, chartDist = null, chartTop = null;
+
+async function loadOverview() {
+  const days = parseInt(document.getElementById("trendDays").value || "7", 10);
+  const [ov, loss] = await Promise.all([
+    api(`/api/dashboard/overview?days=${days}`),
+    api(`/api/dashboard/loss-prevention?days=${days}`),
+  ]);
+
+  // ---- KPI ----
+  const t = ov.today;
+  setKpi("kpiAssessments", fmt(t.assessments));
+  setKpi("kpiHigh", fmt(t.high_risk));
+  setKpi("kpiPending", fmt(ov.pending_cases));
+  setKpi("kpiPassRate", (t.pass_rate * 100).toFixed(1) + "%");
+  setKpi("kpiBlockRate", (t.block_rate * 100).toFixed(1) + "%");
+  setKpi("kpiLoss", "¥" + (loss.blocked_amount / 10000).toFixed(1), "万");
+
+  // 环比：用趋势最后一天 vs 前一天
+  const tr = ov.trend || [];
+  if (tr.length >= 2) {
+    const last = tr[tr.length - 1], prev = tr[tr.length - 2];
+    delta("kpiAssessDelta", last.total - prev.total);
+    delta("kpiHighDelta", last.high_risk - prev.high_risk);
+    delta("kpiPendingDelta", last.rejected - prev.rejected);
+    delta("kpiPassDelta", 0, true);
+    delta("kpiBlockDelta", 0, true);
+  }
+  // 迷你 sparkline
+  drawSpark("sparkAssess", tr.map(d => d.total), "#2563eb");
+  drawSpark("sparkHigh", tr.map(d => d.high_risk), "#dc2626");
+
+  // ---- 趋势折线 ----
+  document.getElementById("topSubtitle").textContent = `近 ${days} 天`;
+  document.getElementById("distSubtitle").textContent = `近 ${days} 天`;
+  chartTrend = initChart("chartTrend", lineOption(
+    tr.map(d => d.date.slice(5)),
+    [
+      { name: "评估量", data: tr.map(d => d.total), itemStyle: { color: "#2563eb" } },
+      { name: "高风险数", data: tr.map(d => d.high_risk), itemStyle: { color: "#dc2626" } },
+      { name: "拦截率", data: tr.map(d => +(d.block_rate * 100).toFixed(1)),
+        itemStyle: { color: "#f59e0b" }, yAxisIndex: 0 },
+    ], { percent: true },
+  )) || chartTrend;
+
+  // ---- 风险等级分布环形 ----
+  const dist = ov.risk_distribution || {};
+  const total = Object.values(dist).reduce((a, b) => a + b, 0);
+  chartDist = initChart("chartDist", pieOption(
+    Object.entries(dist).map(([k, v]) => ({ name: k, value: v, itemStyle: { color: LEVEL_COLOR[k] } })),
+    total, "近 7 天评估",
+  )) || chartDist;
+
+  // ---- 规则命中 TOP5 ----
+  const top = (ov.top_rules || []).slice().reverse();
+  chartTop = initChart("chartTopRules", barHOption(
+    top.map(r => `${r.rule_id} ${r.rule_name}`),
+    top.map(r => r.hits),
+    RULE_COLORS,
+  )) || chartTop;
+}
+
+function setKpi(id, text, unit) {
+  const el = document.getElementById(id);
+  el.innerHTML = text + (unit ? ` <span class="unit">${unit}</span>` : "");
+}
+
+function delta(id, n, neutral) {
+  const el = document.getElementById(id);
+  if (neutral || !n) { el.className = "kpi-delta"; el.textContent = n ? `${n > 0 ? "+" : ""}${n}` : "持平"; return; }
+  el.className = `kpi-delta ${n > 0 ? "up" : "down"}`;
+  el.textContent = `${n > 0 ? "▲ +" : "▼ "}${n}`;
+}
+
+function drawSpark(id, data, color) {
+  const el = document.getElementById(id);
+  if (!el || !data.length) return;
+  initChart(id, {
+    grid: { left: 0, right: 0, top: 2, bottom: 0 },
+    xAxis: { type: "category", show: false, data: data.map((_, i) => i) },
+    yAxis: { type: "value", show: true, min: 0, axisLabel: { show: false }, splitLine: { show: false } },
+    series: [{
+      type: "bar", data, barWidth: 4,
+      itemStyle: { color, borderRadius: [2, 2, 0, 0] },
+    }],
+  });
+}
+
+async function loadRealtime() {
+  const data = await api("/api/dashboard/realtime?limit=8");
+  const body = document.getElementById("realtimeBody");
+  if (!data.items.length) {
+    body.innerHTML = `<tr><td colspan="5" class="empty-state"><div class="icon">◌</div>暂无风控事件</td></tr>`;
+    return;
+  }
+  body.innerHTML = data.items.map(e => `
+    <tr>
+      <td class="text-muted" style="font-size:12px">${(e.create_time || "").slice(11, 19)}</td>
+      <td><a href="/cases?user_id=${e.user_id}" class="text-decoration-none">${e.user_id}</a></td>
+      <td>${e.event_type}</td>
+      <td><b>${e.final_score ?? "-"}</b> <span class="text-muted" style="font-size:11px">${e.risk_level || ""}</span></td>
+      <td>${decisionBadge(e.decision)}</td>
+    </tr>`).join("");
+}
+
+document.getElementById("trendDays").addEventListener("change", loadOverview);
+
+(async () => {
+  await loadOverview();
+  await loadRealtime();
+  setInterval(loadRealtime, 5000);   // 实时事件流 5s 刷新
+})();
+</script>
+{% endblock %}

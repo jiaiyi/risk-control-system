@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}仪表盘{% endblock %} · 电商风控系统</title>
+
+  <!-- 本地 vendor 优先，避免演示时网络不可用 -->
+  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- ==================== 侧边栏 ==================== -->
+  <aside class="sidebar">
+    <div class="logo-row">
+      <div class="logo-mark">盾</div>
+      <div class="logo-text">
+        <div class="name">电商风控系统</div>
+        <div class="ver">AI Risk v1.3</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-group">监控</div>
+      <a class="nav-item {% if active == 'dashboard' %}active{% endif %}" href="/">
+        <span class="nav-icon">▤</span><span>仪表盘</span>
+      </a>
+      <a class="nav-item {% if active == 'risk-check' %}active{% endif %}" href="/risk-check">
+        <span class="nav-icon">⌕</span><span>风险检查</span>
+      </a>
+
+      <div class="nav-group">策略</div>
+      <a class="nav-item {% if active == 'rules' %}active{% endif %}" href="/rules">
+        <span class="nav-icon">≡</span><span>规则管理</span>
+      </a>
+      <a class="nav-item {% if active == 'simulation' %}active{% endif %}" href="/simulation">
+        <span class="nav-icon">⧉</span><span>规则仿真</span>
+      </a>
+      <a class="nav-item {% if active == 'lists' %}active{% endif %}" href="/lists">
+        <span class="nav-icon">☰</span><span>名单管理</span>
+      </a>
+
+      <div class="nav-group">运营</div>
+      <a class="nav-item {% if active == 'cases' %}active{% endif %}" href="/cases">
+        <span class="nav-icon">◈</span><span>案件管理</span>
+      </a>
+      <a class="nav-item {% if active == 'graph' %}active{% endif %}" href="/graph">
+        <span class="nav-icon">⌘</span><span>关联图谱</span>
+      </a>
+      <a class="nav-item {% if active == 'chat' %}active{% endif %}" href="/chat">
+        <span class="nav-icon">✦</span><span>AI 助手</span>
+      </a>
+
+      <div class="nav-group">系统</div>
+      <a class="nav-item {% if active == 'audit' %}active{% endif %}" href="/audit">
+        <span class="nav-icon">✎</span><span>审计日志</span>
+      </a>
+      <a class="nav-item {% if active == 'settings' %}active{% endif %}" href="/settings">
+        <span class="nav-icon">⚙</span><span>系统配置</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="avatar">张</div>
+      <div class="user-meta">
+        <div class="uname">张晨曦</div>
+        <div class="urole">风控策略师</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ==================== 主区域 ==================== -->
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1>{% block page_title %}{% endblock %}</h1>
+        <p>{% block page_subtitle %}{% endblock %}</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="search-box">
+          <input type="text" id="globalSearch" placeholder="搜索用户 / 案件号 / 规则">
+        </div>
+        <button class="icon-btn" title="通知">🔔</button>
+        <div class="avatar avatar-sm">张</div>
+      </div>
+    </header>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<!-- 全局提示 -->
+<div id="toast" class="toast-box" role="status"></div>
+
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

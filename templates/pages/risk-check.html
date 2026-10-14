@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}风险检查{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <!-- ==================== 表单 ==================== -->
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header"><div class="title">发起风控检查</div></div>
+      <div class="card-body">
+        <form id="checkForm">
+          <div class="mb-3">
+            <label class="form-label">事件类型 <span class="text-danger">*</span></label>
+            <select class="form-select" id="eventType" required>
+              <option value="登录">登录</option>
+              <option value="营销领券">营销领券</option>
+              <option value="下单">下单</option>
+              <option value="支付">支付</option>
+              <option value="售后申请">售后申请</option>
+              <option value="物流投诉">物流投诉</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">用户 ID <span class="text-danger">*</span></label>
+            <input class="form-control" id="userId" value="1003" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">关联业务 ID <span class="text-danger">*</span></label>
+            <input class="form-control" id="sourceId" placeholder="如订单号、登录记录 ID" required>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label">设备标识</label>
+              <input class="form-control" id="deviceId" placeholder="D-XXX">
+            </div>
+            <div class="col-6">
+              <label class="form-label">登录 IP</label>
+              <input class="form-control" id="loginIp" placeholder="10.x.x.x">
+            </div>
+          </div>
+          <button class="btn btn-primary w-100" type="submit" id="btnCheck">
+            发起检查
+          </button>
+        </form>
+
+        <hr class="my-3">
+        <div class="subtitle mb-2" style="font-size:12.5px;color:var(--c-text-3)">快捷场景（一键填充）</div>
+        <div class="d-flex flex-wrap gap-2" id="sceneButtons"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 结果 ==================== -->
+  <div class="col-lg-7">
+    <div id="resultEmpty" class="card">
+      <div class="card-body empty-state">
+        <div class="icon">⌕</div>
+        填写左侧表单发起一次风控检查，这里会展示评分、决策与命中规则
+      </div>
+    </div>
+
+    <div id="resultBox" class="d-none">
+      <!-- 结论卡 -->
+      <div class="card">
+        <div class="card-body d-flex align-items-center gap-4">
+          <div class="text-center" style="min-width:110px">
+            <div style="font-size:34px;font-weight:700;line-height:1.1" id="rScore">-</div>
+            <div id="rLevel" class="mt-1"></div>
+          </div>
+          <div class="flex-grow-1">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span style="font-size:13px;color:var(--c-text-2)">决策</span>
+              <span id="rDecision"></span>
+              <span class="badge badge-gray ms-2" id="rRuleCount"></span>
+            </div>
+            <div id="rListHit" style="font-size:12.5px;color:var(--c-text-2)"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 命中规则 -->
+      <div class="card">
+        <div class="card-header"><div class="title">命中规则</div></div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table">
+              <thead><tr><th>规则</th><th>分类</th><th>等级</th><th>分值</th><th>动作</th></tr></thead>
+              <tbody id="rRulesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 评分链路 -->
+      <div class="card">
+        <div class="card-header"><div class="title">评分链路</div>
+          <span class="subtitle">SPEC 11.1 Q5：顺序不可调换</span></div>
+        <div class="card-body"><div id="rBreakdown" class="sim-step"></div></div>
+      </div>
+
+      <!-- 特征 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="title">特征快照</div>
+          <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse"
+                  data-bs-target="#featureBox">展开 / 收起</button>
+        </div>
+        <div class="card-body collapse" id="featureBox">
+          <div id="rFeatures" class="d-flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SCENES = [
+  { label: "撞库试登", uid: "1002", dev: "D-9002", ip: "203.0.113.7", et: "登录" },
+  { label: "新设备异地", uid: "1002", dev: "D-NEW-8888", ip: "203.0.113.7", et: "登录" },
+  { label: "同设备养号", uid: "1003", dev: "D-SHARED-0001", ip: "172.16.0.10", et: "登录" },
+  { label: "同 IP 批量", uid: "1006", dev: "D-7700", ip: "10.99.99.99", et: "登录" },
+  { label: "短时高频登录", uid: "1010", dev: "D-7710", ip: "10.99.99.99", et: "登录" },
+  { label: "短时批量领券", uid: "1003", dev: "D-8003", ip: "172.16.0.20", et: "营销领券" },
+  { label: "高频+全券种", uid: "1004", dev: "D-8004", ip: "172.16.0.20", et: "营销领券" },
+  { label: "大额累计领券", uid: "1005", dev: "D-8005", ip: "172.16.0.20", et: "营销领券" },
+  { label: "同设备多账号领券", uid: "1006", dev: "D-SHARED-0002", ip: "172.16.0.20", et: "营销领券" },
+];
+
+// 取阈值配置，用于评分链路的文案展示（多规则加分值可在线调整，不能写死）
+api("/api/settings/thresholds")
+  .then(d => { window._bonus = d.thresholds.RISK_MULTI_RULE_BONUS; })
+  .catch(() => { window._bonus = 3; });
+
+document.getElementById("sceneButtons").innerHTML = SCENES.map((s, i) => `
+  <button type="button" class="btn btn-sm btn-outline-secondary" data-i="${i}">${s.label}</button>`).join("");
+
+document.getElementById("sceneButtons").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-i]");
+  if (!btn) return;
+  const s = SCENES[+btn.dataset.i];
+  document.getElementById("eventType").value = s.et;
+  document.getElementById("userId").value = s.uid;
+  document.getElementById("deviceId").value = s.dev;
+  document.getElementById("loginIp").value = s.ip;
+  document.getElementById("sourceId").value = `WEB-${s.et}-${s.uid}-${Date.now().toString().slice(-6)}`;
+});
+
+document.getElementById("checkForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("btnCheck");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border-sm spinner-border"></span> 检查中…';
+  try {
+    const r = await api("/api/risk/check", {
+      method: "POST",
+      body: JSON.stringify({
+        event_type: document.getElementById("eventType").value,
+        user_id: document.getElementById("userId").value.trim(),
+        source_id: document.getElementById("sourceId").value.trim(),
+        event_data: {
+          device_id: document.getElementById("deviceId").value.trim() || null,
+          login_ip: document.getElementById("loginIp").value.trim() || null,
+        },
+      }),
+    });
+    renderResult(r);
+  } catch (err) {
+    toast("检查失败：" + err.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "发起检查";
+  }
+});
+
+function renderResult(r) {
+  document.getElementById("resultEmpty").classList.add("d-none");
+  document.getElementById("resultBox").classList.remove("d-none");
+
+  document.getElementById("rScore").textContent = r.final_score;
+  document.getElementById("rScore").style.color =
+    r.final_score >= 80 ? "var(--c-danger)" : r.final_score >= 60 ? "#ea580c"
+    : r.final_score >= 30 ? "var(--c-warning)" : "var(--c-success)";
+  document.getElementById("rLevel").innerHTML = levelBadge(r.risk_level);
+  document.getElementById("rDecision").innerHTML = decisionBadge(r.decision);
+  document.getElementById("rRuleCount").textContent = `命中 ${r.rule_count} 条规则`;
+  document.getElementById("rListHit").innerHTML =
+    `名单判定：<b>${r.list_hit.type}</b> —— ${r.list_hit.detail}`;
+
+  document.getElementById("rRulesBody").innerHTML = r.triggered_rules.length
+    ? r.triggered_rules.map(t => `
+        <tr>
+          <td><a href="/rules/${t.rule_id}" class="text-decoration-none"><b>${t.rule_id}</b></a>
+              <div class="text-muted" style="font-size:12px">${t.rule_name}</div></td>
+          <td>${t.rule_category}</td>
+          <td>${levelBadge(t.risk_level)}</td>
+          <td><b>${t.risk_score}</b></td>
+          <td>${t.action}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="5" class="empty-state">未命中任何规则</td></tr>`;
+
+  // 评分链路
+  const b = r.score_breakdown || {};
+  const steps = [
+    `① max(命中规则分值) = <b>${b.max_rule_score ?? 0}</b>`,
+    `② + 多规则加分 ${window._bonus ?? 3} × (命中数-1) = <b>+${b.multi_rule_bonus ?? 0}</b>`,
+    `③ 灰名单加严 = <b>+${b.graylist_bonus ?? 0}</b>${b.graylist_bonus ? "" : "（未命中灰名单）"}`,
+    `④ 一票否决：<b>${b.veto ? "触发（规则等级=极高）" : "未触发"}</b>`,
+    `⑤ 最终评分 = <b style="font-size:16px;color:var(--c-primary)">${b.final_score ?? r.final_score}</b>`,
+  ];
+  document.getElementById("rBreakdown").innerHTML =
+    steps.map(s => `<div class="mb-1">${s}</div>`).join("");
+
+  // 特征
+  const feats = r.features || {};
+  const keys = Object.keys(feats);
+  document.getElementById("rFeatures").innerHTML = keys.length
+    ? keys.map(k => `<span class="badge badge-gray" title="${k}">${k.replace(/^(user|order|sku|addr|login|coupon|device|ip|phone)_/, "")} = <b>${feats[k]}</b></span>`).join("")
+    : `<div class="text-muted">本次走名单短路路径，未计算特征（AC-5）</div>`;
+
+  toast(`检查完成：${r.decision}（${r.final_score} 分）`, r.final_score >= 60 ? "err" : "ok");
+}
+</script>
+{% endblock %}
