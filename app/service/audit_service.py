@@ -17,6 +17,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.errors import ServiceError
 from app.models import RiskAuditLog
 
 logger = logging.getLogger(__name__)
@@ -24,17 +25,9 @@ logger = logging.getLogger(__name__)
 VALID_ACTION_TYPES = ("规则", "名单", "案件", "配置")
 
 
-class AuditServiceError(Exception):
+class AuditServiceError(ServiceError):
     code = "BIZ_AUDIT_ERROR"
     http_status = 400
-
-    def __init__(self, message: str, detail: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail or {}
-
-    def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "detail": self.detail}
 
 
 def _dump(value) -> str | None:

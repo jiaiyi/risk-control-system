@@ -41,3 +41,6 @@ Thumbs.db
 # 数据导出
 *.tmp
 *.bak
+
+# 运行时配置覆盖（通过 /api/settings 在线调整阈值 / 缓存策略后生成，属环境状态，不随代码提交）
+data/runtime_settings.json

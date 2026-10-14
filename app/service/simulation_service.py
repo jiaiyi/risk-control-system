@@ -20,6 +20,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.errors import ServiceError
 from app.engine.decision import (
     compute_score,
     resolve_context,
@@ -50,17 +51,9 @@ _WATCHED_TABLES = {
 }
 
 
-class SimulationServiceError(Exception):
+class SimulationServiceError(ServiceError):
     code = "BIZ_SIMULATION_ERROR"
     http_status = 400
-
-    def __init__(self, message: str, detail: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail or {}
-
-    def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "detail": self.detail}
 
 
 def _snapshot_counts(db: Session) -> dict:

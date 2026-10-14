@@ -36,10 +36,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import cache
+from app.engine.decision import generate_id
+from app.errors import ServiceError
 from app.models import (
     RiskAssessment,
     RiskAuditLog,
     RiskCase,
+    RiskChallenge,
     RiskFeature,
     RiskUserProfile,
 )
@@ -53,17 +56,9 @@ REVIEWABLE_STATUS = ("待审核", "审核中")
 CASE_DECISIONS = ("已通过", "已拒绝")
 
 
-class CaseServiceError(Exception):
+class CaseServiceError(ServiceError):
     code = "BIZ_CASE_ERROR"
     http_status = 400
-
-    def __init__(self, message: str, detail: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail or {}
-
-    def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "detail": self.detail}
 
 
 class CaseNotFoundError(CaseServiceError):
@@ -596,3 +591,133 @@ def review_case(
         audit_log_id=log.log_id,
         message=blacklist_error,
     )
+
+
+# ============================================================
+# 二次验证（Challenge 档，API-27 / FR-04）
+# ============================================================
+class ChallengeError(CaseServiceError):
+    code = "BIZ_CHALLENGE_ERROR"
+
+
+class ChallengeNotFoundError(CaseServiceError):
+    code = "BIZ_CHALLENGE_NOT_FOUND"
+    http_status = 404
+
+
+class ChallengeStateError(CaseServiceError):
+    code = "BIZ_CHALLENGE_STATE_INVALID"
+    http_status = 409
+
+
+class ChallengeTokenInvalidError(CaseServiceError):
+    code = "BIZ_CHALLENGE_TOKEN_INVALID"
+    http_status = 403
+
+
+def _challenge_dict(chl: RiskChallenge) -> dict:
+    return {
+        "challenge_id": chl.challenge_id,
+        "assessment_id": chl.assessment_id,
+        "user_id": chl.user_id,
+        "status": chl.status,
+        "expire_time": chl.expire_time.isoformat(sep=" ", timespec="seconds") if chl.expire_time else None,
+        "create_time": chl.create_time.isoformat(sep=" ", timespec="seconds") if chl.create_time else None,
+    }
+
+
+def verify_challenge(db: Session, challenge_id: str, verify_token: str) -> dict:
+    """提交二次验证（API-27）
+
+    SPEC Q10 决策：
+      · 验证通过 → `status='已验证'`，**不创建案件**
+      · 超时未验证 → `status='已超时'`，并**创建案件**（复用同一 `assessment_id`）
+
+    模拟实现（PRD 10.4 已确认取舍）：不接真实短信 / 验证码通道，
+    凭据只做等值比对。
+    """
+    chl = db.query(RiskChallenge).filter(RiskChallenge.challenge_id == challenge_id).first()
+    if chl is None:
+        raise ChallengeNotFoundError(f"二次验证记录不存在：{challenge_id}",
+                                     {"challenge_id": challenge_id})
+    if chl.status != "待验证":
+        raise ChallengeStateError(f"该验证当前状态为「{chl.status}」，不可重复提交",
+                                  {"challenge_id": challenge_id, "status": chl.status})
+
+    now = datetime.now()
+
+    # ---- 先判超时：超时后凭据即使正确也不再放行（Q10）----
+    if chl.expire_time <= now:
+        result = _escalate_challenge(db, chl, reason="二次验证超时")
+        return {**result, "message": "验证已超时，已自动升级为人工审核"}
+
+    if not verify_token or chl.verify_token != verify_token:
+        raise ChallengeTokenInvalidError("验证凭据不正确",
+                                         {"challenge_id": challenge_id})
+
+    chl.status = "已验证"
+    db.flush()
+    _audit(db, operator="challenge", action_desc="二次验证通过",
+           target_id=challenge_id, after={"status": "已验证"})
+    db.commit()
+
+    logger.info("二次验证通过: %s（user=%s，不创建案件）", challenge_id, chl.user_id)
+    return {**_challenge_dict(chl), "verified": True, "case_id": None}
+
+
+def expire_challenges(db: Session, operator: str = "scheduler") -> int:
+    """扫描超时未验证的记录并升级为人工审核（定时任务，Q10）"""
+    now = datetime.now()
+    rows = db.query(RiskChallenge).filter(
+        RiskChallenge.status == "待验证",
+        RiskChallenge.expire_time <= now,
+    ).all()
+    if not rows:
+        return 0
+
+    for chl in rows:
+        _escalate_challenge(db, chl, reason="二次验证超时")
+    db.commit()
+    logger.info("二次验证超时升级：%d 条", len(rows))
+    return len(rows)
+
+
+def _escalate_challenge(db: Session, chl: RiskChallenge, reason: str) -> dict:
+    """把一个超时的 challenge 升级为案件（复用同一 assessment_id，SPEC Q10）"""
+    chl.status = "已超时"
+
+    assessment = (db.query(RiskAssessment)
+                  .filter(RiskAssessment.assessment_id == chl.assessment_id).first())
+
+    existing = db.query(RiskCase).filter(
+        RiskCase.assessment_id == chl.assessment_id).first()
+    case_id = existing.case_id if existing else None
+
+    if existing is None:
+        rules = []
+        if assessment and assessment.rule_results:
+            try:
+                rules = json.loads(assessment.rule_results)
+            except (json.JSONDecodeError, TypeError):
+                rules = []
+        if not isinstance(rules, list):
+            rules = []
+
+        case = RiskCase(
+            case_id=generate_id("cas"),
+            assessment_id=chl.assessment_id,
+            user_id=chl.user_id,
+            case_status="待审核",
+            case_category=rules[0].get("rule_category", "未知") if rules else "未知",
+            conflict_flag=0,
+            risk_detail=_json({"rule_results": rules, "source": reason}),
+            source_id=None,
+            event_type=None,
+        )
+        db.add(case)
+        case_id = case.case_id
+
+    db.flush()
+    _audit(db, operator="scheduler", action_desc=reason, target_id=chl.challenge_id,
+           after={"status": "已超时", "case_id": case_id})
+    return {**_challenge_dict(chl), "verified": False, "case_id": case_id}

@@ -35,6 +35,11 @@ K_AGENT_SESSION = "risk:agent:sess" # AI 助手会话
 _client: "redis.Redis | None" = None
 _client_ready = False
 
+# 进程内计数器 —— 供 /api/health/metrics 计算缓存命中率（S-11 性能可验证）。
+# 与 Redis 自身的 keyspace_hits 区分：这里只统计**本进程**对缓存的访问，
+# 不会被同实例上其他程序的读写干扰。
+_counters = {"get_hit": 0, "get_miss": 0, "set": 0, "delete": 0, "error": 0}
+
 
 def get_client() -> "redis.Redis | None":
     """获取 Redis 客户端。
@@ -79,8 +84,13 @@ def safe_get(key: str) -> Any | None:
         return None
     try:
         raw = c.get(key)
-        return json.loads(raw) if raw is not None else None
+        if raw is None:
+            _counters["get_miss"] += 1
+            return None
+        _counters["get_hit"] += 1
+        return json.loads(raw)
     except Exception as exc:  # noqa: BLE001
+        _counters["error"] += 1
         logger.warning("缓存读取失败 [%s]，回源数据库: %s", key, exc)
         return None
 
@@ -92,8 +102,10 @@ def safe_set(key: str, value: Any, ttl: int) -> bool:
         return False
     try:
         c.setex(key, ttl, json.dumps(value, ensure_ascii=False, default=str))
+        _counters["set"] += 1
         return True
     except Exception as exc:  # noqa: BLE001
+        _counters["error"] += 1
         logger.warning("缓存写入失败 [%s]: %s", key, exc)
         return False
 
@@ -182,10 +194,14 @@ def invalidate_features(user_id: str) -> None:
 
 
 def stats() -> dict:
-    """缓存状态摘要（供 /api/health/metrics 使用）"""
+    """缓存状态摘要（供 /api/health/metrics 使用）
+
+    `get_hit` / `get_miss` / `set` 为**本进程**计数（用于算命中率）；
+    `hits` / `misses` 为 Redis 实例级计数（便于排查是否有别的程序在抢连接）。
+    """
     c = get_client()
     if c is None:
-        return {"available": False, "enabled": settings.REDIS_ENABLED}
+        return {"available": False, "enabled": settings.REDIS_ENABLED, **_counters}
     try:
         info = c.info("stats")
         keyspace = c.info("keyspace")
@@ -197,7 +213,8 @@ def stats() -> dict:
             "keys": keyspace.get(db_key, {}).get("keys", 0),
             "hits": info.get("keyspace_hits", 0),
             "misses": info.get("keyspace_misses", 0),
+            **_counters,
         }
     except Exception as exc:  # noqa: BLE001
         logger.warning("缓存状态查询失败: %s", exc)
-        return {"available": False, "enabled": True, "error": str(exc)}
+        return {"available": False, "enabled": True, "error": str(exc), **_counters}

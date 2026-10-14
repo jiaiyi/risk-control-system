@@ -17,6 +17,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.errors import ServiceError
 from app.engine.decision import blend_profile_score, profile_alpha, score_to_level
 from app.models import RiskAssessment, RiskUserProfile
 from app.service import list_service
@@ -24,17 +25,9 @@ from app.service import list_service
 logger = logging.getLogger(__name__)
 
 
-class ProfileServiceError(Exception):
+class ProfileServiceError(ServiceError):
     code = "BIZ_PROFILE_ERROR"
     http_status = 400
-
-    def __init__(self, message: str, detail: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail or {}
-
-    def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "detail": self.detail}
 
 
 class ProfileNotFoundError(ProfileServiceError):

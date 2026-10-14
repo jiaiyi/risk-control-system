@@ -34,6 +34,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import cache
+from app.errors import ServiceError
 from app.config import settings
 from app.models import RiskAuditLog, RiskList, RiskListArchive
 from app.service import audit_service
@@ -60,17 +61,9 @@ TIME_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d %H:
 # ============================================================
 # 业务异常（接口层据此转 HTTP 状态码，SPEC 6.3 错误码体系）
 # ============================================================
-class ListServiceError(Exception):
+class ListServiceError(ServiceError):
     code = "BIZ_LIST_ERROR"
     http_status = 400
-
-    def __init__(self, message: str, detail: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail or {}
-
-    def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "detail": self.detail}
 
 
 class ListExpireRequiredError(ListServiceError):
@@ -505,25 +498,33 @@ def add_list_item(
     return item
 
 
-def remove_list_item(db: Session, list_id: int, operator: str | None = None) -> RiskList:
-    """移除名单项（API-15 / FR-23）"""
+def remove_list_item(db: Session, list_id: int, operator: str | None = None) -> dict:
+    """移除名单项（API-15 / FR-23）
+
+    返回**被移除条目的快照 dict**，而不是 ORM 对象 ——
+    对象在 commit 后已删除，调用方再访问其属性会触发 `ObjectDeletedError`。
+    """
     item = db.query(RiskList).filter(RiskList.list_id == list_id).first()
     if item is None:
         raise ListNotFoundError(f"名单项不存在：{list_id}", {"list_id": list_id})
 
-    before = {
-        "list_type": item.list_type, "entity_type": item.entity_type,
-        "entity_value": item.entity_value, "reason": item.reason,
+    snapshot = {
+        "list_id": list_id,
+        "list_type": item.list_type,
+        "entity_type": item.entity_type,
+        "entity_value": item.entity_value,
+        "reason": item.reason,
         "expire_time": item.expire_time.isoformat(sep=" ", timespec="seconds") if item.expire_time else None,
     }
     db.delete(item)
-    _audit(db, operator=operator, action_desc=f"移除{item.list_type}", target_id=list_id, before=before)
+    _audit(db, operator=operator, action_desc=f"移除{item.list_type}",
+           target_id=list_id, before=snapshot)
     db.commit()
     cache.invalidate_list()
 
-    logger.info("名单移除: %s %s=%s id=%s", before["list_type"], before["entity_type"],
-                before["entity_value"], list_id)
-    return item
+    logger.info("名单移除: %s %s=%s id=%s", snapshot["list_type"], snapshot["entity_type"],
+                snapshot["entity_value"], list_id)
+    return snapshot
 
 
 def list_items(

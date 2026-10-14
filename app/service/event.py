@@ -28,6 +28,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.errors import ServiceError
 from app.engine.decision import DecisionOutcome, generate_id, run_risk_check
 from app.models import RiskAssessment, RiskAuditLog, RiskEvent
 from app.service import audit_service, list_service
@@ -42,17 +43,9 @@ SHORTCUT_SCORE = {"拒绝": 100, "通过": 0}
 SHORTCUT_LEVEL = {"拒绝": "极高", "通过": "低"}
 
 
-class EventServiceError(Exception):
+class EventServiceError(ServiceError):
     code = "BIZ_EVENT_ERROR"
     http_status = 400
-
-    def __init__(self, message: str, detail: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail or {}
-
-    def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "detail": self.detail}
 
 
 class UserNotFoundError(EventServiceError):

@@ -1,20 +1,40 @@
 """
 电商风控系统 - FastAPI 应用入口
 
-当前为项目骨架（SPEC 任务 T-01）：
-  - 应用实例与生命周期钩子
-  - 静态资源挂载
-  - 健康检查接口
+接口层职责（SPEC 3.2）：
+    · 应用实例、生命周期钩子、中间件
+    · **统一异常处理**：服务层 `ServiceError` → `{code, message, detail}`
+    · 路由注册（11 个 Router）
+    **不含任何业务逻辑** —— 全部交给服务层。
 
-各业务路由（10 个 Router / 45 个端点）将随任务 T-17 逐步注册启用。
+错误码体系见 SPEC 6.3；服务层所有异常的 `code` / `http_status` 都已按该体系定义，
+所以这里一个处理器就够了，不用在每个 Router 里逐个 try/except。
 """
 import logging
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api import (
+    audit as audit_api,
+    cases,
+    challenge,
+    dashboard,
+    graph,
+    lists,
+    profiles,
+    risk,
+    rules,
+    simulation,
+)
+from app.api import settings as settings_api
 from app.config import settings
+from app.errors import ServiceError
+from app.service import settings_service
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -35,6 +55,12 @@ async def lifespan(app: FastAPI):
                 settings.RISK_PASS_THRESHOLD,
                 settings.RISK_MARK_THRESHOLD,
                 settings.RISK_REVIEW_THRESHOLD)
+
+    # 回灌在线调整过、且已持久化的配置（FR-56）
+    applied = settings_service.apply_overrides()
+    if applied:
+        logger.info("  运行时覆盖  %d 项：%s", len(applied), applied)
+
     logger.info("=" * 62)
     yield
     logger.info("%s 已停止", settings.APP_NAME)
@@ -47,12 +73,53 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ----------------------------------------------------------------------
+# 中间件：接口耗时采样（供 /api/health/metrics 的 P95 —— S-11 性能可验证）
+# ----------------------------------------------------------------------
+@app.middleware("http")
+async def perf_middleware(request: Request, call_next):
+    started = time.perf_counter()
+    ok = True
+    try:
+        response = await call_next(request)
+        ok = response.status_code < 500
+        return response
+    except Exception:
+        ok = False
+        raise
+    finally:
+        path = request.url.path
+        if path.startswith("/api") or path == "/health":
+            settings_service.perf.record(path, (time.perf_counter() - started) * 1000, ok)
 
 
-@app.get("/health", tags=["运维"], summary="健康检查")
+# ----------------------------------------------------------------------
+# 统一异常处理：服务层业务异常 → HTTP 响应
+# ----------------------------------------------------------------------
+@app.exception_handler(ServiceError)
+async def service_error_handler(request: Request, exc: ServiceError) -> JSONResponse:
+    """把服务层异常转成 SPEC 6.3 规定的统一错误响应体
+
+    注意：`BIZ_WRITEBACK_FAILED` 这类场景**不抛异常**，而是返回 200 +
+    `writeback.success=false`（由服务层直接返回结果表达），走不到这里。
+    """
+    logger.warning("业务异常 %s %s → %s: %s",
+                   request.method, request.url.path, exc.code, exc.message)
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+# ----------------------------------------------------------------------
+# 静态资源（前端 T-19 落地后再挂；目录不存在时不报错）
+# ----------------------------------------------------------------------
+_static_dir = Path(__file__).resolve().parent.parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+
+@app.get("/health", tags=["运维"], summary="服务存活探针")
 def health() -> dict:
-    """服务存活探针，同时回显关键配置以便排查环境问题。"""
+    """轻量探针（不含 DB 往返）—— 依赖健康度请用 `/api/health/metrics`"""
     return {
         "status": "ok",
         "app": settings.APP_NAME,
@@ -67,22 +134,22 @@ def health() -> dict:
 
 
 # ----------------------------------------------------------------------
-# 业务路由注册（随任务推进逐步启用，见 SPEC 第 10 章 T-17）
+# 路由注册（SPEC 6.1 接口清单）
 # ----------------------------------------------------------------------
-# from app.api import (pages, risk, rules, cases, lists, profiles,
-#                      dashboard, graph, simulation, audit, agent)
-#
-# app.include_router(pages.router)                 # 8 个页面
-# app.include_router(risk.router, prefix="/api")   # 实时风险检查
-# app.include_router(rules.router, prefix="/api")  # 规则管理 + 仿真
-# app.include_router(cases.router, prefix="/api")  # 案件管理 + 处置回写
-# app.include_router(lists.router, prefix="/api")  # 三色名单 + 批量导入
-# app.include_router(profiles.router, prefix="/api")
-# app.include_router(dashboard.router, prefix="/api")
-# app.include_router(graph.router, prefix="/api")
-# app.include_router(simulation.router, prefix="/api")
-# app.include_router(audit.router, prefix="/api")
-# app.include_router(agent.router, prefix="/api")
+API_PREFIX = "/api"
+
+app.include_router(risk.router, prefix=API_PREFIX)                  # API-01
+app.include_router(rules.router, prefix=API_PREFIX)                 # API-02~08
+app.include_router(cases.router, prefix=API_PREFIX)                 # API-09~12
+app.include_router(lists.router, prefix=API_PREFIX)                 # API-13~17
+app.include_router(graph.router, prefix=API_PREFIX)                 # API-18
+app.include_router(profiles.router, prefix=API_PREFIX)              # API-19
+app.include_router(dashboard.router, prefix=API_PREFIX)             # API-20~22
+app.include_router(simulation.router, prefix=API_PREFIX)            # API-23~25
+app.include_router(audit_api.router, prefix=API_PREFIX)             # API-26
+app.include_router(challenge.router, prefix=API_PREFIX)             # API-27
+app.include_router(settings_api.router, prefix=API_PREFIX)          # API-46~49
+app.include_router(settings_api.health_router, prefix=API_PREFIX)   # API-50~52
 
 
 if __name__ == "__main__":

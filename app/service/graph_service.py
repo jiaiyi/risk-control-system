@@ -25,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import cache
+from app.errors import ServiceError
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -44,17 +45,9 @@ REL_LABEL = {
 }
 
 
-class GraphServiceError(Exception):
+class GraphServiceError(ServiceError):
     code = "BIZ_GRAPH_ERROR"
     http_status = 400
-
-    def __init__(self, message: str, detail: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail or {}
-
-    def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "detail": self.detail}
 
 
 # ============================================================
