@@ -1,0 +1,70 @@
+-- ============================================
+-- 电商风控系统 - 数据库初始化指南
+-- ============================================
+--
+-- 本系统共 28 张表，按以下顺序执行：
+--
+--   1. init_business_tables.sql   19 张业务表 (DDL)          ✅ 已就绪
+--   2. init_business_data.sql     业务表测试数据             ⬜ T-04
+--   3. init_risk_tables.sql        9 张风控表 (DDL)          ✅ 已就绪
+--   4. init_risk_data.sql          41 条预置风控规则          ⬜ T-05
+--
+-- ============================================
+-- 表清单
+-- ============================================
+--
+-- 业务表（19 张，只读映射）
+--   参考实现原有 17 张：
+--     user_info / region / receive_info / product_category / sku_info /
+--     order_status / order_info / order_detail / logistics / order_logistics /
+--     logistics_company / logistics_complaint / logistics_complaints_record /
+--     postsale_status / postsale_reason / postsale / postsale_logistics
+--   本期新增 2 张（登录与营销领券事件的数据底座）：
+--     user_login_record / coupon_receive_record
+--
+-- 风控表（9 张，读写）
+--   参考实现原有 7 张（其中 risk_blacklist 重构为 risk_list）：
+--     risk_rule / risk_event / risk_feature / risk_assessment / risk_case /
+--     risk_list / risk_user_profile
+--   本期新增 2 张：
+--     risk_audit_log（操作审计流水，仅追加）
+--     risk_challenge（二次验证记录）
+--
+-- ============================================
+-- 使用方式
+-- ============================================
+--
+-- 方式1（推荐）：Python 脚本一键初始化
+--   python scripts/init_db.py
+--
+-- 方式2：手动按顺序执行
+--   mysql -u root -p --default-character-set=utf8mb4 ecs < sql/init_business_tables.sql
+--   mysql -u root -p --default-character-set=utf8mb4 ecs < sql/init_business_data.sql
+--   mysql -u root -p --default-character-set=utf8mb4 ecs < sql/init_risk_tables.sql
+--   mysql -u root -p --default-character-set=utf8mb4 ecs < sql/init_risk_data.sql
+--
+-- 方式3：仅创建表结构（不含数据）
+--   mysql -u root -p --default-character-set=utf8mb4 ecs < sql/init_business_tables.sql
+--   mysql -u root -p --default-character-set=utf8mb4 ecs < sql/init_risk_tables.sql
+--
+-- ============================================
+-- 注意事项
+-- ============================================
+-- - 数据库名: ecs（需提前创建: CREATE DATABASE ecs DEFAULT CHARSET utf8mb4;）
+-- - 字符集: utf8mb4 / utf8mb4_0900_ai_ci
+-- - 业务表按外键依赖排序，可安全顺序执行
+-- - 所有建表语句使用 CREATE TABLE IF NOT EXISTS，可重复执行
+--
+-- ============================================
+-- 相对参考实现的表结构变更（详见 specs/SPEC.md 5.3 / 5.4）
+-- ============================================
+--   risk_rule       + is_deleted（逻辑删除）；分类 6→10 类；动作新增「二次验证」
+--   risk_event      event_type 4→6 类（+登录、+营销领券）
+--   risk_feature    entity_type 由枚举改为字符串（9 个特征维度）
+--   risk_case       + conflict_flag（名单冲突标记）
+--   risk_blacklist → risk_list（三色 × 五类主体，单表建模）
+--   risk_audit_log  新增
+--   risk_challenge  新增
+--
+-- 说明：因为是全新项目，本脚本直接采用最终表结构，
+--       不需要参考实现里的 migration_add_case_source_id.sql 一类的增量迁移脚本。
