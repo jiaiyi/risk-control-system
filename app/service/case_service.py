@@ -43,7 +43,7 @@ from app.models import (
     RiskFeature,
     RiskUserProfile,
 )
-from app.service import list_service
+from app.service import audit_service, list_service
 from app.service.list_service import ListServiceError
 
 logger = logging.getLogger(__name__)
@@ -143,17 +143,11 @@ def _json(obj) -> str:
 
 def _audit(db: Session, *, operator: str, action_desc: str, target_id,
            before=None, after=None) -> RiskAuditLog:
-    log = RiskAuditLog(
-        operator=operator or "system",
-        action_type="案件",
-        action_desc=action_desc,
-        target_id=str(target_id),
-        before_value=_json(before) if before is not None else None,
-        after_value=_json(after) if after is not None else None,
+    """写案件类审计流水（统一走 audit_service —— T-15 收编）"""
+    return audit_service.log(
+        db, operator=operator, action_type="案件", action_desc=action_desc,
+        target_id=target_id, before=before, after=after,
     )
-    db.add(log)
-    db.flush()      # 拿到 log_id 供响应体返回
-    return log
 
 
 # ============================================================

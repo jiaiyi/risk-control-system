@@ -420,14 +420,20 @@ def compute_phone_features(db: Session, receive_id: str | None) -> dict[str, flo
 # 汇总入口（含缓存编排）
 # ============================================================
 # 可缓存的维度 → (缓存键后缀, TTL)。订单/商品不在其中（强制实时）
-def _cached(db: Session, entity: str, cache_id: str, builder, *args) -> dict[str, float]:
-    """通用「先查缓存、未命中则计算并回填」包装"""
+def _cached(db: Session, entity: str, cache_id: str, builder, *args,
+            write_cache: bool = True) -> dict[str, float]:
+    """通用「先查缓存、未命中则计算并回填」包装
+
+    `write_cache=False` 时**只读缓存、不回填** —— 规则仿真（T-16）要求零副作用，
+    不能因为跑一次仿真就把特征写进 Redis。读缓存本身无副作用，仍可加速。
+    """
     key = cache.feature_key(entity, cache_id)
     hit = cache.safe_get(key)
     if isinstance(hit, dict):
         return {k: float(v) for k, v in hit.items()}
     val = builder(db, *args)
-    cache.safe_set(key, val, settings.CACHE_TTL_FEATURE)
+    if write_cache:
+        cache.safe_set(key, val, settings.CACHE_TTL_FEATURE)
     return val
 
 
@@ -438,6 +444,7 @@ def compute_all_features(
     receive_id: str | None = None,
     device_id: str | None = None,
     login_ip: str | None = None,
+    write_cache: bool = True,
 ) -> dict[str, float]:
     """计算全部 43 个特征
 
@@ -447,27 +454,35 @@ def compute_all_features(
       · receive_id 有收货地址时传入
       · device_id  登录/领券事件自带；下单/支付类事件取该用户最近一次登录的设备
       · login_ip   同上
+      · write_cache 是否把计算结果回填 Redis（仿真场景传 False 保证零副作用）
     """
     features: dict[str, float] = {}
+    wc = write_cache
 
     # ---- 可缓存维度（TTL 60s）----
     # ⚠️ 缓存键必须包含**所有影响结果的输入**：
     #    login / coupon 维度的结果依赖 device_id（如 login_is_new_device、
     #    coupon_device_account_count_24h），若只用 user_id 做键，
     #    换个设备查询会命中旧缓存 → 返回错误的聚集特征值。
-    features.update(_cached(db, "user", user_id, compute_user_features, user_id))
+    features.update(_cached(db, "user", user_id, compute_user_features, user_id,
+                            write_cache=wc))
     features.update(_cached(db, "addr", f"{user_id}:{receive_id or '-'}",
-                            compute_address_features, user_id, receive_id))
+                            compute_address_features, user_id, receive_id,
+                            write_cache=wc))
     features.update(_cached(db, "login", f"{user_id}:{device_id or '-'}",
-                            compute_login_features, user_id, device_id))
+                            compute_login_features, user_id, device_id,
+                            write_cache=wc))
     features.update(_cached(db, "coupon", f"{user_id}:{device_id or '-'}",
-                            compute_coupon_features, user_id, device_id))
+                            compute_coupon_features, user_id, device_id,
+                            write_cache=wc))
     if device_id:
-        features.update(_cached(db, "device", device_id, compute_device_features, device_id))
+        features.update(_cached(db, "device", device_id, compute_device_features, device_id,
+                                write_cache=wc))
     else:
         features.update(compute_device_features(db, None))
     if login_ip:
-        features.update(_cached(db, "ip", login_ip, compute_ip_features, login_ip))
+        features.update(_cached(db, "ip", login_ip, compute_ip_features, login_ip,
+                                write_cache=wc))
     else:
         features.update(compute_ip_features(db, None))
 

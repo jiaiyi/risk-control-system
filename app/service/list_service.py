@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from app import cache
 from app.config import settings
 from app.models import RiskAuditLog, RiskList, RiskListArchive
+from app.service import audit_service
 
 logger = logging.getLogger(__name__)
 
@@ -212,27 +213,18 @@ class ListVerdict:
         }
 
 
-def _json(obj) -> str:
-    return json.dumps(obj, ensure_ascii=False, default=str)
-
-
 def _audit(
     db: Session, *, operator: str | None, action_desc: str, target_id,
     before: dict | None = None, after: dict | None = None,
-) -> None:
-    """写操作审计流水
+) -> RiskAuditLog:
+    """写名单类审计流水（统一走 audit_service —— T-15 收编了原先的内联实现）
 
-    T-15 会把它抽成独立的 audit_service；此处内联，保证名单变更当下即可留痕
-    （PRD 4.6：加白 / 移除 / 白名单命中均可查）。
+    PRD 4.6「滥用防护」：加白 / 移除 / 白名单命中均需可查。
     """
-    db.add(RiskAuditLog(
-        operator=operator or "system",
-        action_type="名单",
-        action_desc=action_desc,
-        target_id=str(target_id),
-        before_value=_json(before) if before is not None else None,
-        after_value=_json(after) if after is not None else None,
-    ))
+    return audit_service.log(
+        db, operator=operator, action_type="名单", action_desc=action_desc,
+        target_id=target_id, before=before, after=after,
+    )
 
 
 def _row_to_hit(row) -> ListHit:

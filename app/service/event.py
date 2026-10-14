@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.engine.decision import DecisionOutcome, generate_id, run_risk_check
 from app.models import RiskAssessment, RiskAuditLog, RiskEvent
-from app.service import list_service
+from app.service import audit_service, list_service
 from app.service.list_service import ListServiceError, ListVerdict
 
 logger = logging.getLogger(__name__)
@@ -139,14 +139,11 @@ def _json(obj) -> str:
 
 
 def _audit(db: Session, *, action_desc: str, target_id, after: dict | None = None) -> None:
-    """名单相关事件落审计（T-15 会抽成 audit_service）"""
-    db.add(RiskAuditLog(
-        operator="risk_engine",
-        action_type="名单",
-        action_desc=action_desc,
-        target_id=str(target_id),
-        after_value=_json(after) if after is not None else None,
-    ))
+    """名单相关事件落审计（统一走 audit_service —— T-15 收编）"""
+    audit_service.log(
+        db, operator="risk_engine", action_type="名单",
+        action_desc=action_desc, target_id=target_id, after=after,
+    )
 
 
 # ============================================================
