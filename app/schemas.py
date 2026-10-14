@@ -169,3 +169,16 @@ class CachePolicyUpdateRequest(BaseModel):
     CACHE_TTL_GRAPH: Optional[int] = Field(None, ge=0, le=86400)
     CACHE_TTL_RULE: Optional[int] = Field(None, ge=0, le=86400)
     operator: str = "admin"
+
+
+# ============================================================
+# API-28~29 AI 助手
+# ============================================================
+class AgentChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000, description="用户消息")
+    session_id: Optional[str] = Field(None, max_length=100,
+                                      description="会话 ID；不传则新建（首轮可省略）")
+
+
+class AgentClearRequest(BaseModel):
+    session_id: str = Field(..., max_length=100)

@@ -4,7 +4,7 @@
 接口层职责（SPEC 3.2）：
     · 应用实例、生命周期钩子、中间件
     · **统一异常处理**：服务层 `ServiceError` → `{code, message, detail}`
-    · 路由注册（11 个 Router）
+    · 路由注册（12 个 Router）
     **不含任何业务逻辑** —— 全部交给服务层。
 
 错误码体系见 SPEC 6.3；服务层所有异常的 `code` / `http_status` 都已按该体系定义，
@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
+    agent as agent_api,
     audit as audit_api,
     cases,
     challenge,
@@ -148,6 +149,7 @@ app.include_router(dashboard.router, prefix=API_PREFIX)             # API-20~22
 app.include_router(simulation.router, prefix=API_PREFIX)            # API-23~25
 app.include_router(audit_api.router, prefix=API_PREFIX)             # API-26
 app.include_router(challenge.router, prefix=API_PREFIX)             # API-27
+app.include_router(agent_api.router, prefix=API_PREFIX)             # API-28/29
 app.include_router(settings_api.router, prefix=API_PREFIX)          # API-46~49
 app.include_router(settings_api.health_router, prefix=API_PREFIX)   # API-50~52
 
