@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 from app import cache  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
-from app.models import RiskAuditLog, RiskList  # noqa: E402
+from app.models import RiskAuditLog, RiskList, RiskListArchive  # noqa: E402
 from app.service import list_service as ls  # noqa: E402
 
 OK, BAD = "  [OK]  ", "  [!!]  "
@@ -70,7 +70,7 @@ IP = "172.16.0.10"
 db = SessionLocal()
 
 # 清空风控表，保证脚本可重复执行
-for model in (RiskList, RiskAuditLog):
+for model in (RiskList, RiskListArchive, RiskAuditLog):
     db.query(model).delete()
 db.commit()
 cache.invalidate_list()
@@ -270,10 +270,10 @@ check(v3.cache_hit is False, "名单变更后缓存已被写后失效")
 check(any(h.entity_type == "IP" for h in v3.black), "新增的黑名单立即生效（无脏读）")
 
 # ============================================================
-section("九、过期归档（FR-42）")
+section("九、过期归档 + 历史名单独立检索（FR-42）")
 
 db.add(RiskList(list_type="黑名单", entity_type="用户", entity_value="U-ARCH-1",
-                reason="待归档", expire_time=datetime.now() - timedelta(days=2)))
+                reason="第一次拉黑", expire_time=datetime.now() - timedelta(days=2)))
 db.add(RiskList(list_type="灰名单", entity_type="用户", entity_value="U-ARCH-2",
                 reason="待归档", expire_time=datetime.now() - timedelta(days=1)))
 db.commit()
@@ -282,16 +282,53 @@ before_count = db.query(RiskList).count()
 archived = ls.archive_expired(db, operator="scheduler")
 check(archived == 2, f"归档清理 2 条过期记录（实际 {archived}）")
 check(db.query(RiskList).count() == before_count - 2, "过期记录已从名单表移除")
+check(db.query(RiskListArchive).count() == 2, "2 条已转入归档表（不是直接丢弃）")
+
+# 归档内容完整性
+row = db.query(RiskListArchive).filter(RiskListArchive.entity_value == "U-ARCH-1").first()
+check(row is not None, "可按主体值检索到归档记录")
+check(row.list_type == "黑名单" and row.reason == "第一次拉黑",
+      f"归档保留了原始名单类型与原因（{row.list_type} / {row.reason}）")
+check(row.original_list_id >= 1,
+      f"保留原名单 ID 便于与原表对照（original_list_id={row.original_list_id}）")
+check(row.archived_by == "scheduler" and row.archive_reason == "过期自动归档",
+      f"记录了归档触发者与原因（{row.archived_by} / {row.archive_reason}）")
+check(row.expire_time is not None and row.create_time is not None,
+      "保留了原过期时间与创建时间")
+
+# 同一主体第二次进出 → 归档可累积，不覆盖
+ls.add_list_item(db, list_type="黑名单", entity_type="用户", entity_value="U-ARCH-1",
+                 reason="第二次拉黑", created_by="tester")
+db.query(RiskList).filter(RiskList.entity_value == "U-ARCH-1").update(
+    {"expire_time": datetime.now() - timedelta(hours=1)})
+db.commit()
+ls.archive_expired(db, operator="scheduler")
+
+total_hist, hist = ls.list_archived(db, entity_type="用户", entity_value="U-ARCH-1")
+check(total_hist == 2, f"同一主体两次进出 → 2 条归档记录（实际 {total_hist}）")
+check({h.reason for h in hist} == {"第一次拉黑", "第二次拉黑"},
+      "两次归档的原因都可检索到（归档累积、不覆盖）")
+
+total_black, _ = ls.list_archived(db, list_type="黑名单")
+check(total_black == 2, f"按名单类型筛选归档（{total_black} 条黑名单归档）")
+
+total_recent, _ = ls.list_archived(db, start_time=datetime.now() - timedelta(hours=1))
+check(total_recent >= 2, f"按归档时间范围筛选（近 1 小时 {total_recent} 条）")
+
+hist_payload = ls.subject_history(db, "用户", "U-ARCH-1")
+check(hist_payload["archived_count"] == 2 and hist_payload["current"] == [],
+      f"主体履历=归档 2 条 + 当前生效 0 条（{hist_payload['archived_count']}）")
 
 arch_audit = (db.query(RiskAuditLog)
               .filter(RiskAuditLog.action_desc == "归档过期名单")
               .order_by(RiskAuditLog.log_id.desc()).first())
-check(arch_audit is not None and arch_audit.before_value and "U-ARCH-1" in arch_audit.before_value,
-      "归档前的内容已快照进审计流水（可追溯）")
+check(arch_audit is not None and arch_audit.before_value and "list_ids" in arch_audit.before_value,
+      "归档动作同时留有审计流水（数据 + 操作 两条留痕）")
 
 stats = ls.list_statistics(db)
 check("by_list_type" in stats and stats["total"] == db.query(RiskList).count(),
       f"统计口径正确：{stats}")
+check("archived" in stats, f"统计含归档数量（archived={stats.get('archived')}）")
 
 db.close()
 

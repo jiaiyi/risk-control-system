@@ -360,8 +360,9 @@ erDiagram
 | `risk_user_profile` | 改造 | 评分口径改为动态衰减加权（无须改表结构，仅改写入逻辑） |
 | **`risk_audit_log`** | **新增** | 操作审计流水（FR-39） |
 | **`risk_challenge`** | **新增** | 二次验证记录（FR-04 Challenge 档） |
+| **`risk_list_archive`** | **新增** | **名单归档表**（FR-42 过期归档；支撑历史名单独立检索，与审计流水互补） |
 
-**合计 28 张表**（19 业务 + 9 风控）。
+**合计 29 张表**（19 业务 + 10 风控）。
 
 > **字段前缀与实体类型映射约定**（决策引擎落特征快照时使用）：
 > `user_` → 用户；`order_` / `sku_` → 订单；`addr_` → 地址；`login_` → 登录；`coupon_` → 领券；`device_` → 设备；`ip_` → IP；`phone_` → 手机号。
@@ -448,6 +449,29 @@ CREATE TABLE IF NOT EXISTS `risk_challenge` (
   KEY `idx_challenge_status` (`status`, `expire_time`),
   CONSTRAINT `challenge_assessment_fk` FOREIGN KEY (`assessment_id`) REFERENCES `risk_assessment` (`assessment_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='二次验证记录表';
+
+-- 名单归档表（FR-42：过期名单清理前的落脚点）
+-- 与 risk_audit_log 的分工：审计流水记录「操作」，本表记录「数据」，
+-- 按主体维度可独立检索历史名单（如「某设备历史上被拉黑过几次」）。
+-- 不设唯一约束：同一主体可被反复加入 / 移除，产生多条归档记录。
+CREATE TABLE IF NOT EXISTS `risk_list_archive` (
+  `archive_id`       bigint       NOT NULL AUTO_INCREMENT COMMENT '归档ID',
+  `original_list_id` bigint       NOT NULL COMMENT '原名单ID',
+  `list_type`        enum('黑名单','白名单','灰名单') NOT NULL COMMENT '名单类型',
+  `entity_type`      enum('用户','手机号','IP','设备','地址') NOT NULL COMMENT '主体类型',
+  `entity_value`     varchar(200) NOT NULL COMMENT '主体值',
+  `reason`           text         COMMENT '原加入原因/准入凭据',
+  `expire_time`      datetime     DEFAULT NULL COMMENT '原过期时间',
+  `created_by`       varchar(50)  DEFAULT NULL COMMENT '原操作人',
+  `create_time`      datetime     DEFAULT NULL COMMENT '原创建时间',
+  `archive_time`     datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '归档时间',
+  `archived_by`      varchar(50)  DEFAULT NULL COMMENT '归档触发者',
+  `archive_reason`   varchar(100) DEFAULT NULL COMMENT '归档原因',
+  PRIMARY KEY (`archive_id`),
+  KEY `idx_archive_entity`    (`entity_type`, `entity_value`),
+  KEY `idx_archive_type_time` (`list_type`, `archive_time`),
+  KEY `idx_archive_time`      (`archive_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='名单归档表';
 ```
 
 ### 5.4 既有表改造 DDL（增量脚本）
@@ -1060,7 +1084,7 @@ T-25 与 T-19~T-24 并行
 | 架构风格已定 | 通过（模块化单体 + 五层分层，含 5 条选型权衡说明） |
 | 模块边界清晰 | 通过（8 大模块职责表，每项明确「不做什么」；PRD 54 条 FR 全部有归属模块） |
 | 接口有契约 | 通过（52 个端点清单 + 4 个核心接口完整契约 + 错误码体系 + OpenAPI 片段） |
-| 数据模型一致 | 通过（28 张表与 PRD 第 8 章实体对齐，含 5 张新增/重构表的完整 DDL） |
+| 数据模型一致 | 通过（29 张表与 PRD 第 8 章实体对齐，含 6 张新增/重构表的完整 DDL） |
 | 非功能有手段 | 通过（21 条 NFR 逐项落成设计手段，非复述指标） |
 | 关键流程有时序 | 通过（3 条跨模块 sequence 图：检查链路 / 审核回写 / 仿真） |
 | 重大选型有 ADR | 通过（8 条 ADR，均含背景、选项、理由、后果） |

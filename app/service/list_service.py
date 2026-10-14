@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from app import cache
 from app.config import settings
-from app.models import RiskAuditLog, RiskList
+from app.models import RiskAuditLog, RiskList, RiskListArchive
 
 logger = logging.getLogger(__name__)
 
@@ -732,13 +732,17 @@ def build_import_template() -> bytes:
 # ============================================================
 # 归档（FR-42，P2）
 # ============================================================
-def archive_expired(db: Session, operator: str = "system") -> int:
-    """清理已过期的名单记录
+def archive_expired(
+    db: Session, operator: str = "system", reason: str = "过期自动归档",
+) -> int:
+    """把已过期的名单记录**归档到 `risk_list_archive`** 并清理原表（FR-42）
 
-    项目未单设归档表（SPEC 5.2 表清单无 risk_list_archive），
-    故「归档」落地为：**删除前把内容写进审计流水的 before_value**，
-    再物理删除。这样既满足 FR-42「过期记录不再堆积」，
-    又保留了「谁在什么时候被移除」的可追溯性。
+    两条留痕各司其职：
+      · `risk_list_archive`（本函数主路径）—— 存**数据**，按主体可独立检索历史名单
+      · `risk_audit_log`（附带）—— 存**操作**，记录「谁在何时触发了这次归档」
+
+    归档表不设唯一约束，同一主体被反复加入 / 移除会产生多条归档记录，
+    由 `archive_time` 区分批次。
     """
     now = datetime.now()
     expired = db.query(RiskList).filter(
@@ -748,23 +752,106 @@ def archive_expired(db: Session, operator: str = "system") -> int:
     if not expired:
         return 0
 
-    snapshot = [
-        {"list_id": i.list_id, "list_type": i.list_type, "entity_type": i.entity_type,
-         "entity_value": i.entity_value, "reason": i.reason,
-         "expire_time": i.expire_time.isoformat(sep=" ", timespec="seconds") if i.expire_time else None}
-        for i in expired
-    ]
     for item in expired:
+        db.add(RiskListArchive(
+            original_list_id=item.list_id,
+            list_type=item.list_type,
+            entity_type=item.entity_type,
+            entity_value=item.entity_value,
+            reason=item.reason,
+            expire_time=item.expire_time,
+            created_by=item.created_by,
+            create_time=item.create_time,
+            archive_time=now,
+            archived_by=operator,
+            archive_reason=reason,
+        ))
         db.delete(item)
 
     _audit(db, operator=operator, action_desc="归档过期名单",
            target_id=f"archive:{len(expired)}",
-           before={"expired_items": snapshot})
+           before={"count": len(expired),
+                   "list_ids": [i.list_id for i in expired]})
     db.commit()
     cache.invalidate_list()
 
-    logger.info("名单归档：清理 %d 条过期记录", len(expired))
+    logger.info("名单归档：%d 条过期记录已转入 risk_list_archive（%s）", len(expired), reason)
     return len(expired)
+
+
+def list_archived(
+    db: Session,
+    *,
+    list_type: str | None = None,
+    entity_type: str | None = None,
+    entity_value: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[int, list[RiskListArchive]]:
+    """检索历史名单（归档记录），支持按主体 / 类型 / 归档时间范围筛选
+
+    典型用法：`list_archived(db, entity_type="设备", entity_value="D-XXX")`
+    —— 查某个设备历史上被拉黑 / 加白过几次。
+    """
+    if list_type and list_type not in VALID_LIST_TYPES:
+        raise ListServiceError(f"名单类型非法：{list_type}")
+    if entity_type and entity_type not in VALID_ENTITY_TYPES:
+        raise ListServiceError(f"主体类型非法：{entity_type}")
+
+    query = db.query(RiskListArchive)
+    if list_type:
+        query = query.filter(RiskListArchive.list_type == list_type)
+    if entity_type:
+        query = query.filter(RiskListArchive.entity_type == entity_type)
+    if entity_value:
+        query = query.filter(RiskListArchive.entity_value == entity_value)
+    if start_time:
+        query = query.filter(RiskListArchive.archive_time >= start_time)
+    if end_time:
+        query = query.filter(RiskListArchive.archive_time <= end_time)
+
+    total = query.count()
+    items = (query.order_by(RiskListArchive.archive_time.desc(),
+                            RiskListArchive.archive_id.desc())
+             .offset(max(page - 1, 0) * page_size).limit(page_size).all())
+    return total, items
+
+
+def subject_history(db: Session, entity_type: str, entity_value: str) -> dict:
+    """某个主体的完整名单履历：当前生效 + 历史归档
+
+    供案件详情 / 名单管理页展示「这个主体被处理过几次」。
+    """
+    now = datetime.now()
+    current = db.query(RiskList).filter(
+        RiskList.entity_type == entity_type,
+        RiskList.entity_value == entity_value,
+    ).all()
+    archived = db.query(RiskListArchive).filter(
+        RiskListArchive.entity_type == entity_type,
+        RiskListArchive.entity_value == entity_value,
+    ).order_by(RiskListArchive.archive_time.desc()).all()
+
+    return {
+        "entity_type": entity_type,
+        "entity_value": entity_value,
+        "current": [
+            {"list_id": i.list_id, "list_type": i.list_type, "reason": i.reason,
+             "expire_time": i.expire_time.isoformat(sep=" ", timespec="seconds") if i.expire_time else None,
+             "active": i.expire_time is None or i.expire_time > now}
+            for i in current
+        ],
+        "archived_count": len(archived),
+        "archived": [
+            {"archive_id": a.archive_id, "original_list_id": a.original_list_id,
+             "list_type": a.list_type, "reason": a.reason,
+             "archive_time": a.archive_time.isoformat(sep=" ", timespec="seconds") if a.archive_time else None,
+             "archive_reason": a.archive_reason}
+            for a in archived
+        ],
+    }
 
 
 # ============================================================
@@ -787,9 +874,11 @@ def list_statistics(db: Session) -> dict:
     ), {"now": now}).first()
 
     total = db.execute(text("SELECT COUNT(*) AS c FROM risk_list")).first()
+    archived = db.execute(text("SELECT COUNT(*) AS c FROM risk_list_archive")).first()
     return {
         "total": total.c if total else 0,
         "by_list_type": by_type,
         "by_entity_type": by_entity,
         "expired": expired.c if expired else 0,
+        "archived": archived.c if archived else 0,
     }

@@ -10,6 +10,7 @@
 --   5. risk_blacklist  →  risk_list（三色 × 五类主体，单表建模）
 --   6. risk_audit_log     新增：操作审计流水（仅追加）
 --   7. risk_challenge     新增：二次验证记录
+--   8. risk_list_archive  新增：名单归档表（FR-42：支撑历史名单独立检索）
 -- ============================================================
 
 USE ecs;
@@ -182,5 +183,27 @@ CREATE TABLE IF NOT EXISTS `risk_challenge` (
   KEY `idx_challenge_status` (`status`,`expire_time`),
   KEY `idx_challenge_assessment` (`assessment_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='二次验证记录表';
+
+-- ============================
+-- 10. 名单归档表（FR-42：过期名单清理前的落脚点，支撑历史名单独立检索）
+-- ============================
+CREATE TABLE IF NOT EXISTS `risk_list_archive` (
+  `archive_id`       bigint       NOT NULL AUTO_INCREMENT COMMENT '归档ID',
+  `original_list_id` bigint       NOT NULL COMMENT '原名单ID',
+  `list_type`        enum('黑名单','白名单','灰名单') NOT NULL COMMENT '名单类型',
+  `entity_type`      enum('用户','手机号','IP','设备','地址') NOT NULL COMMENT '主体类型',
+  `entity_value`     varchar(200) NOT NULL COMMENT '主体值',
+  `reason`           text         COMMENT '原加入原因/准入凭据',
+  `expire_time`      datetime     DEFAULT NULL COMMENT '原过期时间',
+  `created_by`       varchar(50)  DEFAULT NULL COMMENT '原操作人',
+  `create_time`      datetime     DEFAULT NULL COMMENT '原创建时间',
+  `archive_time`     datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '归档时间',
+  `archived_by`      varchar(50)  DEFAULT NULL COMMENT '归档触发者',
+  `archive_reason`   varchar(100) DEFAULT NULL COMMENT '归档原因',
+  PRIMARY KEY (`archive_id`),
+  KEY `idx_archive_entity` (`entity_type`,`entity_value`),
+  KEY `idx_archive_type_time` (`list_type`,`archive_time`),
+  KEY `idx_archive_time` (`archive_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='名单归档表';
 
 SET FOREIGN_KEY_CHECKS = 1;

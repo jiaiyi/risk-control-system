@@ -1,9 +1,9 @@
 """
 电商风控系统 - ORM 模型定义
 
-共 28 张表：
+共 29 张表：
   · 业务侧 19 张（只读映射，不在本项目中写入）
-  · 风控侧  9 张（读写）
+  · 风控侧 10 张（读写）
 
 业务表结构沿用尚硅谷参考实现，保证与既有数据生成脚本兼容；
 风控表按 specs/SPEC.md 5.3 / 5.4 定义，相对参考实现的变更见文件末尾注释。
@@ -523,6 +523,45 @@ class RiskChallenge(Base):
     )
 
 
+class RiskListArchive(Base):
+    """名单归档表（FR-42）
+
+    过期名单清理前的落脚点。与 `risk_audit_log` 的区别：
+    审计流水是「操作留痕」（谁在何时做了什么），本表是「数据归档」——
+    按主体维度可**独立检索历史名单**（例如「某设备历史上被拉黑过几次」）。
+
+    不设唯一约束：同一主体可被反复加入 / 移除，产生多条归档记录。
+    `original_list_id` 保留原表主键，便于与原表对照追溯。
+    """
+    __tablename__ = "risk_list_archive"
+
+    archive_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True, comment="归档ID")
+    original_list_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="原名单ID")
+    list_type: Mapped[str] = mapped_column(
+        Enum("黑名单", "白名单", "灰名单", name="archive_list_type_enum"),
+        nullable=False, comment="名单类型",
+    )
+    entity_type: Mapped[str] = mapped_column(
+        Enum("用户", "手机号", "IP", "设备", "地址", name="archive_entity_type_enum"),
+        nullable=False, comment="主体类型",
+    )
+    entity_value: Mapped[str] = mapped_column(String(200), nullable=False, comment="主体值")
+    reason: Mapped[Optional[str]] = mapped_column(Text, comment="原加入原因/准入凭据")
+    expire_time: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="原过期时间")
+    created_by: Mapped[Optional[str]] = mapped_column(String(50), comment="原操作人")
+    create_time: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="原创建时间")
+    archive_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), comment="归档时间")
+    archived_by: Mapped[Optional[str]] = mapped_column(String(50), comment="归档触发者")
+    archive_reason: Mapped[Optional[str]] = mapped_column(String(100), comment="归档原因")
+
+    __table_args__ = (
+        Index("idx_archive_entity", "entity_type", "entity_value"),
+        Index("idx_archive_type_time", "list_type", "archive_time"),
+        Index("idx_archive_time", "archive_time"),
+    )
+
+
 # ============================================================
 # 相对参考实现的变更清单（详见 specs/SPEC.md 5.4）
 # ============================================================
@@ -534,5 +573,6 @@ class RiskChallenge(Base):
 # 6. RiskAuditLog  新增：操作审计流水
 # 7. RiskChallenge 新增：二次验证记录
 # 8. 业务侧新增 UserLoginRecord / CouponReceiveRecord 两张表
+# 9. RiskListArchive 新增：名单归档表（FR-42，支撑历史名单独立检索）
 #
-# 表统计：业务 19 张（17 原有 + 2 新增）+ 风控 9 张（7 原有 + 2 新增）= 28 张
+# 表统计：业务 19 张（17 原有 + 2 新增）+ 风控 10 张（7 原有 + 3 新增）= 29 张

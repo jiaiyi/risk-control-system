@@ -2,11 +2,11 @@
 -- 电商风控系统 - 数据库初始化指南
 -- ============================================
 --
--- 本系统共 28 张表，按以下顺序执行：
+-- 本系统共 29 张表，按以下顺序执行：
 --
 --   1. init_business_tables.sql   19 张业务表 (DDL)          ✅ 已就绪
 --   2. init_business_data.sql     业务表测试数据             ⬜ T-04
---   3. init_risk_tables.sql        9 张风控表 (DDL)          ✅ 已就绪
+--   3. init_risk_tables.sql       10 张风控表 (DDL)          ✅ 已就绪
 --   4. init_risk_data.sql          41 条预置风控规则          ⬜ T-05
 --
 -- ============================================
@@ -22,13 +22,14 @@
 --   本期新增 2 张（登录与营销领券事件的数据底座）：
 --     user_login_record / coupon_receive_record
 --
--- 风控表（9 张，读写）
+-- 风控表（10 张，读写）
 --   参考实现原有 7 张（其中 risk_blacklist 重构为 risk_list）：
 --     risk_rule / risk_event / risk_feature / risk_assessment / risk_case /
 --     risk_list / risk_user_profile
---   本期新增 2 张：
+--   本期新增 3 张：
 --     risk_audit_log（操作审计流水，仅追加）
 --     risk_challenge（二次验证记录）
+--     risk_list_archive（名单归档表，支撑历史名单独立检索）
 --
 -- ============================================
 -- 使用方式

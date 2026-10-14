@@ -6,7 +6,7 @@
   1. 建库 ecs（若不存在）
   2. 执行 19 张业务表 DDL
   3. 导入业务测试数据
-  4. 执行 9 张风控表 DDL
+  4. 执行 10 张风控表 DDL
   5. 导入 41 条预置风控规则
   6. 生成补充数据（登录记录 / 领券记录 / 物流投诉记录）
 
@@ -32,7 +32,7 @@ SQL_DIR = ROOT / "sql"
 SQL_STEPS = [
     ("19 张业务表 DDL", "init_business_tables.sql"),
     ("业务测试数据", "init_business_data.sql"),
-    ("9 张风控表 DDL", "init_risk_tables.sql"),
+    ("10 张风控表 DDL", "init_risk_tables.sql"),
     ("41 条预置规则", "init_risk_data.sql"),
 ]
 
