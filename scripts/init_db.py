@@ -178,6 +178,16 @@ def main() -> None:
 
     gen_main()
 
+    # 数据重灌后必须清空缓存，否则旧特征会污染新数据
+    # （SPEC 4.5「写后失效」原则的落地）
+    try:
+        from app import cache  # noqa: PLC0415
+
+        n = cache.safe_delete_prefix("risk:")
+        print(f"\n    ✓ 已清理 Redis 缓存 {n} 个键（避免旧特征污染）")
+    except Exception as exc:  # noqa: BLE001
+        print(f"\n    ! 缓存清理跳过（Redis 不可用）：{exc}")
+
     print("\n" + "=" * 62)
     print("初始化完成。")
     print("=" * 62)
