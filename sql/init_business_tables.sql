@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS `coupon_receive_record` (
   `coupon_amount` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT '券面金额',
   `receive_time` timestamp NOT NULL COMMENT '领取时间',
   `device_id` varchar(100) DEFAULT NULL COMMENT '设备标识',
-  `use_status` enum('未使用','已使用','已过期') NOT NULL DEFAULT '未使用' COMMENT '使用状态',
+  `use_status` enum('未使用','已使用','已过期','已作废') NOT NULL DEFAULT '未使用' COMMENT '使用状态',
   `use_time` timestamp NULL DEFAULT NULL COMMENT '使用时间',
   PRIMARY KEY (`receive_id`),
   KEY `idx_coupon_user_time` (`user_id`,`receive_time`),

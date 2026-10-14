@@ -245,7 +245,7 @@ class CouponReceiveRecord(Base):
     receive_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="领取时间")
     device_id: Mapped[Optional[str]] = mapped_column(String(100), comment="设备标识")
     use_status: Mapped[str] = mapped_column(
-        Enum("未使用", "已使用", "已过期", name="coupon_use_status_enum"),
+        Enum("未使用", "已使用", "已过期", "已作废", name="coupon_use_status_enum"),
         nullable=False, server_default="未使用", comment="使用状态",
     )
     use_time: Mapped[Optional[datetime]] = mapped_column(DateTime, comment="使用时间")

@@ -456,10 +456,15 @@ def add_list_item(
     expire_time: datetime | None = None,
     created_by: str | None = None,
     force: bool = False,
+    auto_commit: bool = True,
 ) -> RiskList:
     """新增名单项（API-14 / FR-22）
 
     校验 → 写库 → 失效缓存 → 记审计，同一事务内完成。
+
+    `auto_commit=False`：只 flush 不提交，事务交给调用方统一控制 ——
+    案件审核（T-12）要把「加黑名单 + 回写业务表 + 更新案件」放在同一事务里，
+    不能被中途 commit 打断。
     """
     value = _validate_enum(list_type, entity_type, entity_value)
 
@@ -499,8 +504,9 @@ def add_list_item(
                   "reason": reason,
                   "expire_time": expire_time.isoformat(sep=" ", timespec="seconds") if expire_time else None})
 
-    db.commit()
-    cache.invalidate_list()     # 写后失效（ADR-03）
+    if auto_commit:
+        db.commit()
+        cache.invalidate_list()     # 写后失效（ADR-03）
 
     logger.info("名单新增: %s %s=%s id=%s 有效期=%s", list_type, entity_type, value,
                 item.list_id, expire_time)
