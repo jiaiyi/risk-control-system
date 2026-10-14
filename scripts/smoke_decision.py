@@ -146,6 +146,21 @@ SCENARIOS = [
 
 db = SessionLocal()
 
+# ---- 数据新鲜度前置检查 ----
+# 9 个场景依赖「近 1 小时 / 近 24 小时」这类相对时间窗口，数据放一会儿就会滑出窗口。
+# 若不先检查，断言会以「期望规则未命中」的形式失败，极易被误读成代码回归。
+_fresh = db.execute(text(
+    "SELECT COUNT(*) AS c FROM user_login_record "
+    "WHERE user_id = '1002' AND login_result = '失败' AND login_time >= NOW() - INTERVAL 1 HOUR"
+)).first()
+if not _fresh or _fresh.c < 5:
+    print("=" * 74)
+    print("【数据已过期，请重建后再跑】9 个场景依赖相对时间窗口，当前数据已滑出窗口：")
+    print(f"  1002 近 1 小时失败登录数 = {_fresh.c if _fresh else 0}（L001 场景需要 >= 5）")
+    print("  请先执行：./.venv/Scripts/python.exe scripts/init_db.py")
+    print("=" * 74)
+    sys.exit(2)
+
 # 清空风控运行数据，保证本脚本可重复执行（19 张业务只读表的数据不动）
 for _model in (RiskFeature, RiskAssessment, RiskCase, RiskChallenge, RiskEvent, RiskUserProfile):
     db.query(_model).delete()

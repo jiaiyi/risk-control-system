@@ -262,6 +262,7 @@ class DecisionOutcome:
     graylist_hit: bool
     hits: list[RuleHitResult] = field(default_factory=list)
     context: dict[str, str | None] = field(default_factory=dict)
+    conflict_flag: int = 0
     case_id: str | None = None
     challenge_id: str | None = None
 
@@ -283,6 +284,7 @@ class DecisionOutcome:
             "features": self.features,
             "score_breakdown": self.breakdown.to_dict(),
             "graylist_hit": self.graylist_hit,
+            "conflict_flag": self.conflict_flag,
             "case_id": self.case_id,
             "challenge_id": self.challenge_id,
             "create_time": datetime.now().isoformat(timespec="seconds"),
@@ -440,11 +442,18 @@ def run_risk_check(
     device_id: str | None = None,
     login_ip: str | None = None,
     graylist_hit: bool = False,
+    force_decision: str | None = None,
+    conflict_flag: int = 0,
 ) -> DecisionOutcome:
     """执行一次完整风控检查并落库
 
-    调用方（事件管道 T-11）负责名单前置裁决：命中黑/白名单时不进入本函数。
+    调用方（事件管道 T-11）负责名单前置裁决：命中黑 / 白名单时不进入本函数。
     仅灰名单命中时，通过 graylist_hit=True 传入以施加加严系数。
+
+    · `force_decision`：名单**冲突**（黑白同时命中）时由事件管道强制覆盖决策
+      （固定为「人工审核」），但评分与等级**仍按正常流程计算** —— 对应 PRD FR-38
+      「冲突场景不做自动裁决，交人工处理」。取值为 None 时按评分映射决策。
+    · `conflict_flag`：名单冲突案件标记，写入 `risk_case.conflict_flag`。
 
     全流程在**单事务**内完成；异常时由调用方回滚。
     """
@@ -487,7 +496,7 @@ def run_risk_check(
     breakdown = compute_score(hits, graylist_hit=graylist_hit)
     final_score = breakdown.final_score
     risk_level = score_to_level(final_score)
-    decision = score_to_decision(final_score, hits)
+    decision = force_decision or score_to_decision(final_score, hits)
 
     # ---- 6. 评估结果 ----
     db.add(RiskAssessment(
@@ -508,6 +517,7 @@ def run_risk_check(
         case = _build_case(
             db, hits, assessment_id, user_id, final_score,
             source_id, event_type, breakdown, graylist_hit,
+            conflict_flag=conflict_flag,
         )
         case_id = case.case_id
     elif decision == "二次验证":
@@ -543,6 +553,7 @@ def run_risk_check(
         graylist_hit=graylist_hit,
         hits=hits,
         context=ctx,
+        conflict_flag=conflict_flag,
         case_id=case_id,
         challenge_id=challenge_id,
     )

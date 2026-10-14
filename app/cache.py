@@ -148,6 +148,15 @@ def rules_key(event_type: str) -> str:
     return f"{K_RULES}:{event_type}"
 
 
+def list_key(entity_type: str, entity_value: str) -> str:
+    """单个主体（五类之一）的三色名单命中结果
+
+    按「主体」而非「整张名单表」缓存：判定时主体是已知的，命中率高且 value 小；
+    名单表任何变更统一走 invalidate_list() 全量失效。
+    """
+    return f"{K_LIST}:{entity_type}:{entity_value}"
+
+
 def agent_session_key(session_id: str) -> str:
     return f"{K_AGENT_SESSION}:{session_id}"
 
