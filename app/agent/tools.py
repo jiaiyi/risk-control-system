@@ -145,7 +145,8 @@ def query_user_profile(user_id: str) -> str:
 
 @tool
 def manage_blacklist(action: str, entity_type: str = "用户", value: str = "",
-                     list_type: str = "黑名单", reason: str = "") -> str:
+                     list_type: str = "黑名单", reason: str = "",
+                     confirm: bool = False) -> str:
     """查询 / 新增 / 移除三色名单条目。
 
     Args:
@@ -154,12 +155,19 @@ def manage_blacklist(action: str, entity_type: str = "用户", value: str = "",
         value: 主体值，如 "1003"、"D-SHARED-0001"、"10.99.99.99"
         list_type: 名单类型，黑名单 / 白名单 / 灰名单（默认黑名单）
         reason: 加入原因或移除原因
+        confirm: **写操作必须显式确认**。「新增」「移除」只有 confirm=true 才会真正执行；
+            用户只是让你"看看/分析"时不要传这个参数（默认 False 即拒绝执行）
 
     注意：白名单有硬约束（必须设有效期、不超 90 天、不能与黑名单共存），
     不满足时工具会返回明确的错误说明。
     """
     db = SessionLocal()
     try:
+        # 先校验 action 合法性，再走写操作确认 —— 顺序反了会把「未知操作」
+        # 误报成「需要确认」
+        if action not in ("查询", "新增", "移除"):
+            return f"未知操作：{action}（必须是 查询 / 新增 / 移除）"
+
         if action == "查询":
             total, items = list_service.list_items(
                 db, list_type=list_type or None, entity_type=entity_type or None,
@@ -174,6 +182,12 @@ def manage_blacklist(action: str, entity_type: str = "用户", value: str = "",
                     "expire_time": i.expire_time.isoformat(sep=" ", timespec="seconds") if i.expire_time else None,
                 } for i in items],
             })
+
+        # ---- 写操作：必须显式确认（防止模型自作主张改数据）----
+        if not confirm:
+            return (f"「{action}」是写操作，需要显式确认。请先向用户复述你要做什么"
+                    f"（例如：将 {entity_type}={value} 加入{list_type}，原因：{reason}），"
+                    f"得到明确同意后再以 confirm=true 重新调用。")
 
         if action == "新增":
             item = list_service.add_list_item(

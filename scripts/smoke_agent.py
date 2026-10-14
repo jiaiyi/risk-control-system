@@ -142,18 +142,29 @@ check("失败" in out or "not_found" in out, f"不存在的用户给出可读错
 out = call(ALL_TOOLS[3], action="查询", list_type="黑名单")
 check("total" in as_json(out), "manage_blacklist 查询")
 
+# ⚠️ 写操作护栏：不带 confirm 一律拒绝（防止模型未经许可擅自动名单）
 out = call(ALL_TOOLS[3], action="新增", entity_type="IP", value="10.5.5.5",
            list_type="黑名单", reason="agent 测试")
-body = as_json(out)
+check("写操作" in out and "confirm" in out, "**不带 confirm 的新增被拒绝**（护栏）")
+
+db = SessionLocal()
+_leaked = db.query(RiskList).filter(RiskList.entity_value == "10.5.5.5").count()
+db.close()
+check(_leaked == 0, f"被拒后数据库零写入（实际 {_leaked} 条）")
+
+body = as_json(call(ALL_TOOLS[3], action="新增", entity_type="IP", value="10.5.5.5",
+                    list_type="黑名单", reason="agent 测试", confirm=True))
 check(isinstance(body, dict) and body.get("list_id"),
-      f"manage_blacklist 新增成功（list_id={body.get('list_id')}）")
+      f"confirm=True 时新增成功（list_id={body.get('list_id')}）")
 
-out = call(ALL_TOOLS[3], action="移除", entity_type="IP", value="10.5.5.5")
-check(as_json(out).get("action") == "移除", "manage_blacklist 移除")
+check("写操作" in call(ALL_TOOLS[3], action="移除", entity_type="IP", value="10.5.5.5"),
+      "不带 confirm 的移除同样被拒")
+out = call(ALL_TOOLS[3], action="移除", entity_type="IP", value="10.5.5.5", confirm=True)
+check(as_json(out).get("action") == "移除", "confirm=True 时移除成功")
 
-# 白名单硬约束在工具里同样生效
+# 白名单硬约束在工具里同样生效（要带 confirm 才走得到那层校验）
 out = call(ALL_TOOLS[3], action="新增", entity_type="用户", value="1002",
-           list_type="白名单", reason="缺有效期")
+           list_type="白名单", reason="缺有效期", confirm=True)
 check("失败" in out or "EXPIRE" in out,
       f"白名单无有效期被拦：{out[:60]}")
 
