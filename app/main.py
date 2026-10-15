@@ -115,8 +115,26 @@ async def service_error_handler(request: Request, exc: ServiceError) -> JSONResp
 # 静态资源（前端 T-19 落地后再挂；目录不存在时不报错）
 # ----------------------------------------------------------------------
 _static_dir = Path(__file__).resolve().parent.parent / "static"
+
+
+class _NoCacheStaticFiles(StaticFiles):
+    """静态资源强制每次校验新鲜度（`Cache-Control: no-cache` + ETag 复用）。
+
+    默认 StaticFiles 不发 Cache-Control，浏览器便按启发式规则缓存 JS/CSS。
+    后果是「改了代码、刷新页面仍拿旧文件」：修复已经上线，用户看到的还是
+    坏页面，且报错信息与当前代码对不上（例如 `qs is not defined`），
+    排查方向会完全跑偏。这里加 `no-cache`：**仍允许浏览器缓存**（配合 ETag
+    返回 304，不浪费带宽），但每次必须先向服务端校验，避免拿到过期资源。
+    """
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 if _static_dir.is_dir():
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    app.mount("/static", _NoCacheStaticFiles(directory=str(_static_dir)), name="static")
 
 
 @app.get("/health", tags=["运维"], summary="服务存活探针")

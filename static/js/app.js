@@ -15,7 +15,40 @@ async function api(path, opts = {}) {
     toast(`${data.code || "错误"}：${data.message}`, "err");
     throw new Error(data.message);
   }
+  // FastAPI 的 422 响应体是 {detail:[...]}，没有 message 字段 —— 上面那个分支
+  // 接不住它，data 会原样返回 undefined.items，调用方在 data.items.length
+  // 上抛 "Cannot read properties of undefined"，页面永远停在转圈。
+  // 这里把 422 也归一成 Error，让失败在调用点就断掉并有明确文案。
+  if (!res.ok) {
+    const detail = Array.isArray(data?.detail)
+      ? data.detail.map(d => `${(d.loc || []).join(".")}: ${d.msg}`).join("; ")
+      : (data?.detail ? JSON.stringify(data.detail) : "");
+    const msg = `请求失败 HTTP ${res.status}${detail ? " —— " + detail : ""}`;
+    toast(msg, "err");
+    throw new Error(msg);
+  }
   return data;
+}
+
+/**
+ * 构造查询串，**丢掉空值参数**。
+ *
+ * 为什么必须丢：FastAPI 对 `int | None` 这类带类型的可选参数，收到空串
+ * 不会当成「未提供」，而是在类型转换阶段直接判 422
+ * （`PageSize`/`is_enabled=` → "Input should be a valid integer"）。
+ * 而 `<select>` 的「全部」选项 value 恰好就是空串 —— 于是「不加筛选」
+ * 反而成了唯一必错的请求。这个坑在 /rules 上真实发生过（整页加载不出来），
+ * 所以在公共 helper 里统一兜住，页面不必各自记得判空。
+ *
+ * 保留 `false` 与 `0`：它们是合法取值，只有 ""/null/undefined 才算未填。
+ */
+function qs(params) {
+  const p = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === "" || v === null || v === undefined) return;
+    p.set(k, v);
+  });
+  return p.toString();
 }
 
 /** 全局提示 */

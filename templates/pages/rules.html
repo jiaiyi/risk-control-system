@@ -75,21 +75,24 @@ document.getElementById("fEventType").innerHTML =
   '<option value="">全部事件</option>' + EVENT_TYPES.map(c => `<option>${c}</option>`).join("");
 
 function buildQuery() {
-  const p = new URLSearchParams({
+  // 参数名必须与后端 Query 声明一致（app/api/rules.py）：
+  // 分类是 `rule_category`，不是 `category` —— 写成 category 后端会当作
+  // 未知参数直接忽略，于是「按分类筛选」静默失效（请求 200、返回未筛选结果）。
+  // 空值交给 qs() 丢掉，否则 `is_enabled=` 会让后端 422。
+  return qs({
     page, page_size: pageSize,
-    category: document.getElementById("fCategory").value,
+    rule_category: document.getElementById("fCategory").value,
     event_type: document.getElementById("fEventType").value,
     risk_level: document.getElementById("fLevel").value,
     is_enabled: document.getElementById("fEnabled").value,
     keyword: document.getElementById("fKeyword").value.trim(),
   });
-  return p.toString();
 }
 
 async function loadRules() {
   const data = await api("/api/rules?" + buildQuery());
-  total = data.total;
   const body = document.getElementById("rulesBody");
+  total = data.total;
 
   if (!data.items.length) {
     body.innerHTML = `<tr><td colspan="10" class="empty-state">
