@@ -228,11 +228,37 @@ async function switchSession(sid) {
   $("sessionHint").textContent = `会话 ${sid.slice(0, 14)}…`;
   const box = $("chatStream");
   box.innerHTML = `
-    <div class="msg-ai"><div class="bubble">
-      已切换到历史会话。上下文已从 Redis 恢复（最近若干轮），
-      可以直接接着问，或点「新对话」重新开始。
+    <div class="msg-ai"><div class="bubble text-muted">
+      <span class="spinner-border spinner-border-sm text-primary"></span> 正在读取历史消息…
     </div></div>`;
   loadSessions();
+
+  // 关键：切会话必须把历史消息**渲染出来**。
+  // 早先这里只打印一句「上下文已从 Redis 恢复」就完事 ——
+  // 上下文其实真的恢复了（后端 load_history 有读），但用户看到的是一片空白，
+  // 于是合理地被判定为「左边的会话没有上下文了」。
+  // 服务端只回「用户/AI 的对话本身」，不含工具调用等内部消息。
+  let data;
+  try {
+    data = await api(`/api/agent/sessions/${encodeURIComponent(sid)}`);
+  } catch (err) {
+    box.innerHTML = `<div class="msg-ai"><div class="bubble text-danger">
+      读取历史消息失败：${err.message}</div></div>`;
+    return;
+  }
+
+  box.innerHTML = "";
+  if (!data.items.length) {
+    box.innerHTML = `<div class="msg-ai"><div class="bubble">
+      该会话没有可展示的对话内容（可能只有工具调用，或消息已过期）。
+    </div></div>`;
+    return;
+  }
+  for (const m of data.items) {
+    if (m.role === "user") addUserMsg(m.content);
+    else addAiMsg(m.content);
+  }
+  scrollBottom();
 }
 
 $("btnSend").addEventListener("click", send);

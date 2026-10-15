@@ -83,3 +83,16 @@ def sessions() -> dict:
     """Redis 里存活的会话（含消息数与最近更新时间），供助手页展示历史会话"""
     items = agent_chat.list_sessions()
     return {"total": len(items), "items": items}
+
+
+@router.get("/sessions/{session_id}", summary="读取会话历史消息")
+def session_detail(session_id: str) -> dict:
+    """切回历史会话时用来还原对话内容。
+
+    只返回「用户说的话」与「AI 的最终回复」，不含 System / Tool 消息 ——
+    工具调用是 Agent 的内部过程，历史回看不需要，也不该塞给前端。
+    会话不存在（或已过期）返回空列表而不是 404：前端切过去看到空对话，
+    比弹一个错误更符合预期（Redis 里会话有 TTL，过一会儿就没了是正常的）。
+    """
+    items = agent_chat.session_messages(session_id)
+    return {"session_id": session_id, "total": len(items), "items": items}

@@ -246,7 +246,11 @@ def clear_session(session_id: str) -> int:
 
 
 def list_sessions() -> list[dict]:
-    """当前存活的会话列表（供 AI 助手页展示）"""
+    """当前存活的会话列表（供 AI 助手页展示），按最近更新时间倒序。
+
+    **必须排序**：`scan` 返回的顺序是 Redis 内部的键顺序，跟时间毫无关系 ——
+    不排的话侧边栏出现的是「随机顺序」，用户找一个刚聊过的会话得从头翻。
+    """
     client = cache.get_client()
     if client is None:
         return []
@@ -268,7 +272,34 @@ def list_sessions() -> list[dict]:
                 break
     except Exception as exc:  # noqa: BLE001
         logger.warning("会话列表查询失败: %s", exc)
-        return out
+    out.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
+    return out
+
+
+def session_messages(session_id: str) -> list[dict]:
+    """读某个会话的**可展示**消息，供前端切回历史会话时还原对话。
+
+    **为什么要单独做这个**：`load_history()` 返回的是 LangChain 的
+    `BaseMessage`（含工具调用、工具返回、System 消息），直接丢给前端
+    既没法渲染也没必要。这里只挑出「人说的话」和「AI 的最终回复」，
+    跳过 System / Tool 消息 —— 工具调用过程是 Agent 的内部细节，
+    历史回看时只需要看到对话本身。
+
+    正文字段用 `content`，前端按 role 决定气泡样式。
+    """
+    out: list[dict] = []
+    for msg in load_history(session_id):
+        msg_type = getattr(msg, "type", "")
+        if msg_type == "human":
+            text = _flatten_content(msg.content)
+            if text.strip():
+                out.append({"role": "user", "content": text})
+        elif msg_type == "ai":
+            # 带 tool_calls 的 AI 消息往往是「我要调工具」的中间态，
+            # content 为空，跳过它免得历史里出现空气泡。
+            text = _flatten_content(msg.content)
+            if text.strip():
+                out.append({"role": "assistant", "content": text})
     return out
 
 
