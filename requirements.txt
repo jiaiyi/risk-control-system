@@ -23,8 +23,13 @@ openpyxl==3.1.5
 langchain==1.2.15
 langchain-openai==1.1.12
 langgraph==1.1.6
+# 直接依赖：app/agent/chat.py 要捕获 openai.APITimeoutError 才能把 LLM 超时
+# 单独映射成 SYS_LLM_TIMEOUT（langchain-openai 会带上它，但直接 import 就该显式声明）
+openai==2.54.0
 
 # ============ 测试 ============
+# httpx 同时也被上面的 openai SDK 用作运行时 HTTP 客户端，
+# app/agent/chat.py 捕获 httpx.TimeoutException 做超时判定
 pytest==8.3.4
 pytest-asyncio==0.25.0
 httpx==0.28.1

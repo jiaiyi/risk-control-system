@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     LLM_MODEL_NAME: str = "qwen-plus"
     LLM_TIMEOUT: int = 60
     AGENT_SESSION_TTL: int = 86400
+    # 回灌给模型的最大历史轮数（从最近一条用户消息往前数）。
+    # 工具输出是缩进 JSON，动辄上千 token，不设上限的话聊 20 轮就会撑爆上下文。
+    AGENT_MAX_HISTORY_TURNS: int = 12
 
     # ==================== 风控决策阈值 ====================
     # 风控评分链路顺序（不可调换）：

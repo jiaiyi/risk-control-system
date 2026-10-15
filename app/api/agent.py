@@ -42,18 +42,26 @@ def chat_stream(payload: AgentChatRequest) -> StreamingResponse:
 
     `chat_stream` 本身是同步生成器，`StreamingResponse` 会自动丢到线程池执行，
     不会阻塞事件循环。
+
+    **session_id 必须在流开始之前定下来**：生成器的返回值走 `StopIteration.value`，
+    `for piece in gen` 这种消费方式拿不到它。这里先取（或新生成）一个 ID，
+    显式传给 agent，再在结束帧里原样回给前端 —— 前端据此把 ID 存下来，
+    下一轮带着它继续对话。早期版本回的是 `payload.session_id`（首轮为 None），
+    导致流式对话永远开新会话、上下文全丢。
     """
+    session_id = payload.session_id or agent_chat.new_session_id()
 
     def _event_generator():
         try:
-            for piece in agent_chat.chat_stream(payload.message, session_id=payload.session_id):
+            for piece in agent_chat.chat_stream(payload.message, session_id=session_id):
                 yield f"data: {json.dumps({'chunk': piece}, ensure_ascii=False)}\n\n"
             yield "data: " + json.dumps(
-                {"done": True, "session_id": payload.session_id}, ensure_ascii=False) + "\n\n"
+                {"done": True, "session_id": session_id}, ensure_ascii=False) + "\n\n"
         except Exception as exc:  # noqa: BLE001
             yield "data: " + json.dumps(
                 {"error": getattr(exc, "message", str(exc)),
-                 "code": getattr(exc, "code", "BIZ_AGENT_ERROR")},
+                 "code": getattr(exc, "code", "BIZ_AGENT_ERROR"),
+                 "session_id": session_id},
                 ensure_ascii=False) + "\n\n"
 
     return StreamingResponse(_event_generator(), media_type="text/event-stream")
@@ -61,9 +69,13 @@ def chat_stream(payload: AgentChatRequest) -> StreamingResponse:
 
 @router.post("/clear", summary="清除会话（API-29）")
 def clear_session(payload: AgentClearRequest) -> dict:
-    """清除会话历史 —— 重新开始一轮新对话"""
-    agent_chat.clear_session(payload.session_id)
-    return {"session_id": payload.session_id, "cleared": True}
+    """清除会话历史 —— 重新开始一轮新对话
+
+    对不存在的会话按幂等处理（清一个不存在的会话 = 成功），
+    `deleted` 带上真实删除条数，便于分辨「确实清掉了」和「本来就没有 / 缓存不可用」。
+    """
+    deleted = agent_chat.clear_session(payload.session_id)
+    return {"session_id": payload.session_id, "cleared": True, "deleted": deleted}
 
 
 @router.get("/sessions", summary="当前会话列表")

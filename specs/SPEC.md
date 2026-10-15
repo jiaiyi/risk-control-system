@@ -985,6 +985,7 @@ sequenceDiagram
 |------|----------------|---------|
 | **安全** | 敏感配置不落代码（NFR-07） | pydantic-settings 从 `.env` 加载；`.env` 加入 `.gitignore` |
 | 安全 | SQL 注入防护（NFR-08） | 全部使用 SQLAlchemy `text()` 参数绑定或 ORM 表达式；**禁止 f-string 拼接 SQL**；AI 工具的 `query_business_data` 使用预定义查询模板白名单 |
+| 安全 | AI 工具不得擅自改数据 | 名单写操作（新增 / 移除）**必须带 `confirm=true` 才执行**：模型先复述意图、取得用户明确同意，再带 `confirm` 重新调用；未确认的调用返回「需要确认」的提示而不是报错，让模型有机会走完确认流程。白名单另受两道硬约束：有效期必填且 ≤ 90 天（超限需 `force=true` 二次确认）、主体已在黑名单时不得直接加白 |
 | 安全 | 规则求值不执行任意代码（NFR-11） | 白名单运算符 `if/elif` 分发，**不使用 `eval` / `exec` / 第三方沙箱库**；未知 op 返回 False + 警告 |
 | 安全 | 跨主体信息保护（NFR-12） | 聚集类特征**只返回计数值**（如 `device_account_count_24h=4`），不返回其他账号 ID；其他账号仅在 `/api/graph` 按权限展开 |
 | 安全 | 输入校验（NFR-09） | 全部请求经 Pydantic 模型校验；枚举用 `Literal` 约束；分值与跳数用 `Field(ge, le)` 约束 |
@@ -994,7 +995,7 @@ sequenceDiagram
 | 性能 | 仪表盘加载 < 2s（NFR-03） | 聚合结果缓存 60s；规则命中 TOP5 用数据库侧 JSON 展开聚合（避免全量拉回内存） |
 | **高可用** | 数据库断连自恢复（NFR-13） | `pool_pre_ping=True`；连接池 `pool_size=10, max_overflow=20` |
 | 高可用 | 缓存故障降级（NFR-14） | 缓存层封装 `safe_get/safe_set`，异常被捕获 → 记警告日志 → 返回 None → 业务直查数据库。**缓存异常不向上传播** |
-| 高可用 | 会话不因重启丢失（FR-41） | Agent 会话持久化到 Redis（`agent:session:{id}`，TTL 24h），替代参考实现的进程内 dict |
+| 高可用 | 会话不因重启丢失（FR-41） | Agent 会话持久化到 Redis（`risk:agent:sess:{session_id}`，TTL 24h），替代参考实现的进程内 dict |
 | **可观测** | 关键路径日志（NFR-19） | 规则命中（规则 ID + 分值）、名单拦截/放行、案件创建、回写动作、缓存命中等均打 INFO 日志；异常打 WARNING 并保留上下文 |
 | 可观测 | 性能可验证（S-11） | 响应体返回 `cache_hit` 字段；日志记录每次检查的 SQL 次数与耗时，便于压测分析 |
 | **合规** | 审计完整性 100%（NFR-20） | 审计写入封装为 `audit_service.log()`，规则/名单/案件/配置四类操作**强制调用**；单元测试断言覆盖率 |

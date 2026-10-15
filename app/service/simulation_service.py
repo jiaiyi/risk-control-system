@@ -16,6 +16,7 @@
     有案件即代表该事件曾被判为高风险，天然是「已知作弊样本」。
 """
 import logging
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -185,8 +186,15 @@ def load_samples(
     limit: int = 50,
     event_type: str | None = None,
     min_score: int | None = None,
+    since: datetime | None = None,
 ) -> list[dict]:
-    """作弊样本库：取历史「已产生案件」的事件作为已知风险样本（FR-52）"""
+    """作弊样本库：取历史「已产生案件」的事件作为已知风险样本（FR-52）
+
+    注意排序口径是 **final_score DESC**，即「取风险分最高的前 N 条」，
+    而不是「取最近的 N 条」。所以 `since` 是**限定取样窗口**，
+    不传就等于从全部历史里取 —— 调用方想说「最近 N 天」时必须显式传 since，
+    否则拿到的样本可能来自任意久远的时间。
+    """
     sql = (
         "SELECT c.user_id, c.event_type, c.source_id, c.case_id, c.case_category, "
         "c.conflict_flag, a.final_score, a.rule_count, a.create_time "
@@ -200,6 +208,9 @@ def load_samples(
     if min_score is not None:
         sql += " AND a.final_score >= :min_score"
         params["min_score"] = min_score
+    if since is not None:
+        sql += " AND a.create_time >= :since"
+        params["since"] = since
     sql += " ORDER BY a.final_score DESC, c.create_time DESC LIMIT :limit"
 
     return [{
@@ -235,14 +246,18 @@ def replay(
     rule_id: str | None = None,
     include_detail: bool = False,
     samples: list[dict] | None = None,
+    since: datetime | None = None,
 ) -> dict:
     """对一组历史事件批量回放，统计规则命中数与命中率（FR-14 / FR-52）
 
     改动前后对比（FR-14 能力 4）的做法：先在旧配置下跑一次存下结果，
     改规则后再跑一次，对比两次的 `rule_stats` 即可。
+
+    `since` 限定取样窗口（样本库按 final_score 排序，不是按时间），
+    不传则不限时间。传了 `samples` 时忽略 `since` 与 `limit`。
     """
     samples = samples if samples is not None else load_samples(
-        db, limit=limit, event_type=event_type)
+        db, limit=limit, event_type=event_type, since=since)
     if not samples:
         raise SimulationServiceError("没有可用样本（历史案件为空，请先跑几条风控检查）")
 

@@ -40,6 +40,26 @@ def _dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
+def _parse_expire_time(raw: str) -> datetime | None:
+    """把模型给的日期串解析成 datetime；空串返回 None。
+
+    空串不在这里报错，而是**交给服务层**抛「白名单必须设置有效期」——
+    报错口径只有一处，避免工具和服务层各说各话。
+
+    模型可能给 "2026-12-31"、"2026-12-31 23:59:59"、ISO 带 T 的写法，
+    末尾的 Z / 时区偏移一律忽略（名单只到日期语义，不涉及时区换算）。
+    """
+    text = (raw or "").strip().replace("T", " ").replace("Z", "").split("+")[0].strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"无法解析有效期「{raw}」，请用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS")
+
+
 # ============================================================
 # 风控决策工具（4）
 # ============================================================
@@ -146,6 +166,7 @@ def query_user_profile(user_id: str) -> str:
 @tool
 def manage_blacklist(action: str, entity_type: str = "用户", value: str = "",
                      list_type: str = "黑名单", reason: str = "",
+                     expire_time: str = "", force: bool = False,
                      confirm: bool = False) -> str:
     """查询 / 新增 / 移除三色名单条目。
 
@@ -155,6 +176,11 @@ def manage_blacklist(action: str, entity_type: str = "用户", value: str = "",
         value: 主体值，如 "1003"、"D-SHARED-0001"、"10.99.99.99"
         list_type: 名单类型，黑名单 / 白名单 / 灰名单（默认黑名单）
         reason: 加入原因或移除原因
+        expire_time: 有效期，格式 YYYY-MM-DD 或 "YYYY-MM-DD HH:MM:SS"。
+            **加入白名单时必填**（白名单禁止永久加白）；黑名单 / 灰名单可省略
+            （灰名单省略时默认 30 天观察期）
+        force: 白名单有效期超过 90 天上限时，必须先把超期情况告诉用户、
+            得到同意后再传 force=true 重试（默认 False 即拒绝）
         confirm: **写操作必须显式确认**。「新增」「移除」只有 confirm=true 才会真正执行；
             用户只是让你"看看/分析"时不要传这个参数（默认 False 即拒绝执行）
 
@@ -192,7 +218,8 @@ def manage_blacklist(action: str, entity_type: str = "用户", value: str = "",
         if action == "新增":
             item = list_service.add_list_item(
                 db, list_type=list_type, entity_type=entity_type, entity_value=value,
-                reason=reason, created_by="agent",
+                reason=reason, expire_time=_parse_expire_time(expire_time),
+                created_by="agent", force=force,
             )
             return _dumps({
                 "action": "新增", "list_id": item.list_id, "list_type": item.list_type,
@@ -203,14 +230,15 @@ def manage_blacklist(action: str, entity_type: str = "用户", value: str = "",
         if action == "移除":
             if not value:
                 return "移除操作必须提供主体值"
-            rows = db.query(list_service.RiskList).filter(
-                list_service.RiskList.entity_value == value,
-                list_service.RiskList.entity_type == entity_type,
-            ).all()
-            if not rows:
-                return f"未找到 {entity_type}={value} 的名单条目"
-            removed = [list_service.remove_list_item(db, r.list_id, operator="agent") for r in rows]
-            return _dumps({"action": "移除", "removed": removed})
+            # 走服务层的「按主体移除」，不在这里自己拼查询 ——
+            # list_type 必须带下去，否则同一主体的其它颜色名单会被一起删掉
+            removed = list_service.remove_list_items_by_subject(
+                db, list_type=list_type, entity_type=entity_type,
+                entity_value=value, operator="agent",
+            )
+            if not removed:
+                return f"未找到 {entity_type}={value} 的{list_type}条目"
+            return _dumps({"action": "移除", "list_type": list_type, "removed": removed})
 
         return f"未知操作：{action}（必须是 查询 / 新增 / 移除）"
     except Exception as exc:  # noqa: BLE001
@@ -273,18 +301,27 @@ def analyze_rule_effectiveness(days: int = 7, rule_id: str = "") -> str:
     命中率与影响用户数。适合回答「某条规则最近命中了多少、误伤了谁」这类问题。
 
     Args:
-        days: 回溯天数，默认 7（会取该范围内的历史案件作为样本）
+        days: 取样窗口天数，默认 7，最大 90。只取该窗口内**已产生案件**的事件作样本，
+            再按风险分从高到低取前 N 条回放（样本量随天数放大）
         rule_id: 可选，只看某一条规则（如 "L002"）
+
+    注意：样本只含「已产生风控案件」的事件，不是全部评估记录 ——
+    因此命中率是相对这批高风险样本算的，不能当成全量流量的命中率。
     """
     db = SessionLocal()
     try:
         days = max(1, min(int(days), 90))
         limit = max(20, min(days * 20, 300))
+        # since 必须显式传：样本库是按 final_score 排序的「最高分前 N 条」，
+        # 不限定时间窗口的话，days 就只剩「放大样本量」的作用，
+        # 模型回一句「最近 7 天」而实际取到几个月前的案件。
         result = simulation_service.replay(
             db, limit=limit, rule_id=rule_id or None, include_detail=False,
+            since=datetime.now() - timedelta(days=days),
         )
         return _dumps({
             "days": days,
+            "sample_window": f"近 {days} 天（{result['sample_count']} 个样本，按风险分取前 {limit} 条）",
             "sample_count": result["sample_count"],
             "avg_score": result["avg_score"],
             "decision_distribution": result["decision_distribution"],

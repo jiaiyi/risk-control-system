@@ -498,11 +498,16 @@ def add_list_item(
     return item
 
 
-def remove_list_item(db: Session, list_id: int, operator: str | None = None) -> dict:
+def remove_list_item(db: Session, list_id: int, operator: str | None = None,
+                     auto_commit: bool = True) -> dict:
     """移除名单项（API-15 / FR-23）
 
     返回**被移除条目的快照 dict**，而不是 ORM 对象 ——
     对象在 commit 后已删除，调用方再访问其属性会触发 `ObjectDeletedError`。
+
+    `auto_commit=False`：只 delete + 记审计，不提交也不失效缓存 ——
+    批量移除（remove_list_items_by_subject）要把多次删除压进同一个事务，
+    不能让第一次 commit 就把后面的操作暴露出去。
     """
     item = db.query(RiskList).filter(RiskList.list_id == list_id).first()
     if item is None:
@@ -519,12 +524,63 @@ def remove_list_item(db: Session, list_id: int, operator: str | None = None) -> 
     db.delete(item)
     _audit(db, operator=operator, action_desc=f"移除{item.list_type}",
            target_id=list_id, before=snapshot)
+    if not auto_commit:
+        return snapshot
+
     db.commit()
     cache.invalidate_list()
 
     logger.info("名单移除: %s %s=%s id=%s", snapshot["list_type"], snapshot["entity_type"],
                 snapshot["entity_value"], list_id)
     return snapshot
+
+
+def remove_list_items_by_subject(
+    db: Session, *, list_type: str, entity_type: str, entity_value: str,
+    operator: str | None = None,
+) -> list[dict]:
+    """按「名单类型 + 主体」移除条目，返回被删条目的快照列表（空列表 = 没找到）
+
+    与 `remove_list_item`（按 list_id）的分工：这个是**按主体维度**删，
+    供 Agent 的名单工具调用 —— 模型收到的是「把 1003 移出黑名单」这类意图，
+    手里并没有 list_id。
+
+    `list_type` **必须参与过滤**：同一主体可以同时存在黑名单与白名单两条记录
+    （`_check_whitelist_rules` 只拦「已在黑名单时新加白」，不阻止两色并存），
+    漏掉这个条件会让「移出黑名单」顺带删掉白名单条目。
+
+    多次删除压进同一个事务，只有一次 commit 与一次缓存失效。
+    """
+    if entity_type not in VALID_ENTITY_TYPES:
+        raise ListServiceError(
+            f"主体类型非法：{entity_type}（可选：{'/'.join(VALID_ENTITY_TYPES)}）",
+            {"entity_type": entity_type})
+    if list_type and list_type not in VALID_LIST_TYPES:
+        raise ListServiceError(
+            f"名单类型非法：{list_type}（可选：{'/'.join(VALID_LIST_TYPES)}）",
+            {"list_type": list_type})
+    entity_value = (entity_value or "").strip()
+    if not entity_value:
+        raise ListServiceError("主体值不能为空", {"entity_type": entity_type})
+
+    q = db.query(RiskList).filter(
+        RiskList.entity_type == entity_type,
+        RiskList.entity_value == entity_value,
+    )
+    if list_type:
+        q = q.filter(RiskList.list_type == list_type)
+    rows = q.all()
+    if not rows:
+        return []
+
+    snapshots = [remove_list_item(db, r.list_id, operator=operator, auto_commit=False)
+                 for r in rows]
+    db.commit()
+    cache.invalidate_list()
+
+    logger.info("名单批量移除: %s %s=%s 共 %d 条", list_type or "全部", entity_type,
+                entity_value, len(snapshots))
+    return snapshots
 
 
 def list_items(
