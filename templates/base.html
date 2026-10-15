@@ -86,6 +86,11 @@
           {{ ui.icon('log-out', 16) }}
         </button>
       </form>
+      {# 折叠入口放这儿：它影响的是侧边栏本身，摆在侧边栏上比摆在页面标题旁边更说得通 #}
+      <button type="button" class="icon-btn collapse-btn" id="btnCollapse"
+              title="折叠 / 展开侧边栏" aria-label="折叠或展开侧边栏">
+        {{ ui.icon('panel-left', 16) }}
+      </button>
     </div>
   </aside>
 
@@ -93,8 +98,11 @@
   <div class="main">
     <header class="topbar">
       <div class="topbar-left">
-        <button class="icon-btn" id="btnCollapse" title="折叠 / 展开侧边栏" aria-label="折叠或展开侧边栏">
-          {{ ui.icon('chevron-left', 16) }}
+        {# 左上角是「返回」而不是「折叠侧边栏」：
+           这个位置的左箭头在用户认知里就是后退，点它收起侧边栏属于反直觉。
+           折叠入口移到侧边栏底部的按钮（见 aside 底部）。 #}
+        <button class="icon-btn" id="btnBack" title="返回上一页" aria-label="返回上一页">
+          {{ ui.icon('arrow-left', 16) }}
         </button>
         <div class="topbar-title">
           {# 默认取路由传入的 page_title / page_subtitle，页面可用同名 block 覆盖 #}

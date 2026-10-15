@@ -212,6 +212,21 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+/* ---------------- 返回上一页 ----------------
+   左上角的左箭头就是「返回」，位置在页面标题旁，符合用户对后退键的预期
+   （原先这个位置放的是折叠侧边栏，点下去不跳转而是收起菜单，很反直觉）。
+
+   历史栈为空时（比如从书签直接打开、或在新标签页打开）不能干等着没反应，
+   否则用户会以为按钮坏了 —— 退到仪表盘兜底。 */
+(function () {
+  const btn = document.getElementById("btnBack");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    if (window.history.length > 1) window.history.back();
+    else location.href = "/";
+  });
+})();
+
 /* ---------------- 侧边栏折叠 ----------------
    状态存 localStorage（隐私模式下静默降级为不持久化）。
    折叠后内容区变宽，需要通知 ECharts 重算尺寸 —— 否则图表会被拉伸变形。 */
@@ -227,21 +242,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const qs = new URLSearchParams(location.search);
   const forced = qs.get("sidebar");
   if (forced === "collapsed" || forced === "expanded") {
-    const collapsed = forced === "collapsed";
-    shell.classList.toggle("collapsed", collapsed);
-    btn.style.transform = collapsed ? "rotate(180deg)" : "";
+    shell.classList.toggle("collapsed", forced === "collapsed");
   } else {
     try {
-      if (localStorage.getItem(KEY) === "1") {
-        shell.classList.add("collapsed");
-        btn.style.transform = "rotate(180deg)";
-      }
+      if (localStorage.getItem(KEY) === "1") shell.classList.add("collapsed");
     } catch (e) { /* ignore */ }
   }
 
   btn.addEventListener("click", () => {
     const collapsed = shell.classList.toggle("collapsed");
-    btn.style.transform = collapsed ? "rotate(180deg)" : "";
     try { localStorage.setItem(KEY, collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
     // 等 CSS 过渡（.2s）走完再 resize，避免图表拿到中间态尺寸
     setTimeout(() => window.dispatchEvent(new Event("resize")), 220);

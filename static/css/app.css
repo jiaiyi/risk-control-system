@@ -168,6 +168,19 @@ body {
 .sidebar-footer .uname { color: #fff; font-size: 13px; font-weight: 500; line-height: 1.3; }
 .sidebar-footer .urole { color: #64748b; font-size: 11px; }
 
+/* 侧边栏底部的两个小按钮（退出登录 / 折叠侧边栏）。
+   背景是深色，不能用 .icon-btn 默认的浅色底，否则像贴了两块白方块。 */
+.sidebar-footer .logout-form { margin-left: auto; }
+.sidebar-footer .icon-btn {
+  background: rgba(255, 255, 255, .07);
+  color: #94a3b8;
+  width: 30px; height: 30px;
+}
+.sidebar-footer .icon-btn:hover {
+  background: rgba(255, 255, 255, .16);
+  color: #fff;
+}
+
 .avatar {
   width: 32px; height: 32px; border-radius: 50%;
   background: linear-gradient(135deg, #f59e0b, #ef4444);
@@ -528,7 +541,11 @@ body {
   }
   .sidebar .side-nav-item:hover::after { opacity: 1; }
   .sidebar .logo-row { justify-content: center; padding: 17px 0 15px; }
-  .sidebar .sidebar-footer { justify-content: center; }
+  /* 轨道形态下页脚只剩头像 + 两个按钮：竖排并居中。
+     margin-left:auto 是给宽屏「把按钮推到最右」用的，这里必须取消，
+     否则窄屏下按钮会被推得东一个西一个。 */
+  .sidebar .sidebar-footer { justify-content: center; flex-direction: column; gap: 8px; }
+  .sidebar .sidebar-footer .logout-form { margin-left: 0; }
   .chat-layout { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
   .search-box input { width: 140px; }
