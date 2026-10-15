@@ -42,14 +42,9 @@ from app.models import (  # noqa: E402
     RiskUserProfile,
 )
 
-OK, BAD = "  [OK]  ", "  [!!]  "
-failures: list[str] = []
-
-
-def check(cond: bool, msg: str) -> None:
-    print((OK if cond else BAD) + msg)
-    if not cond:
-        failures.append(msg)
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # scripts/ 供 import _smoke
+import _smoke as smoke  # noqa: E402
+from _smoke import check, section  # noqa: E402
 
 
 def fake_hit(score: int, level: str = "高", action: str = "人工审核", rule_id: str = "T999") -> RuleHitResult:
@@ -60,13 +55,6 @@ def fake_hit(score: int, level: str = "高", action: str = "人工审核", rule_
         description="", priority=1,
     )
     return RuleHitResult(rule)
-
-
-def section(title: str) -> None:
-    print()
-    print("=" * 74)
-    print(title)
-    print("=" * 74)
 
 
 # ============================================================
@@ -149,21 +137,20 @@ db = SessionLocal()
 # ---- 数据新鲜度前置检查 ----
 # 9 个场景依赖「近 1 小时 / 近 24 小时」这类相对时间窗口，数据放一会儿就会滑出窗口。
 # 若不先检查，断言会以「期望规则未命中」的形式失败，极易被误读成代码回归。
-_fresh = db.execute(text(
-    "SELECT COUNT(*) AS c FROM user_login_record "
-    "WHERE user_id = '1002' AND login_result = '失败' AND login_time >= NOW() - INTERVAL 1 HOUR"
-)).first()
-if not _fresh or _fresh.c < 5:
+#
+# 过期就**自动重建**（用 init_db 第 6 步的同一个生成器），而不是让使用者手动去跑
+# init_db —— 后者会让本脚本依赖「上一个跑的是谁」，连跑其它 smoke 后就失效。
+if not smoke.ensure_scenario_data():
     print("=" * 74)
-    print("【数据已过期，请重建后再跑】9 个场景依赖相对时间窗口，当前数据已滑出窗口：")
-    print(f"  1002 近 1 小时失败登录数 = {_fresh.c if _fresh else 0}（L001 场景需要 >= 5）")
-    print("  请先执行：./.venv/Scripts/python.exe scripts/init_db.py")
+    print("【场景数据不可用】自动重建后仍未满足 L001 的前置条件：")
+    print(f"  1002 近 1 小时失败登录数 = {smoke.scenario_data_age_check()}（需要 >= 5）")
+    print("  请检查 scripts/gen_extra_data.py 是否正常。")
     print("=" * 74)
     sys.exit(2)
 
 # 清空风控运行数据，保证本脚本可重复执行（19 张业务只读表的数据不动）
-for _model in (RiskFeature, RiskAssessment, RiskCase, RiskChallenge, RiskEvent, RiskUserProfile):
-    db.query(_model).delete()
+# 表清单来自 _smoke，不在这里另抄一份
+smoke.reset_risk_tables(db)
 db.query(RiskRule).filter(RiskRule.rule_id == "SMOKE-CHL-001").delete()
 db.commit()
 
@@ -333,12 +320,4 @@ db.commit()
 db.close()
 
 # ============================================================
-print()
-print("=" * 74)
-if failures:
-    print(f"结果：{len(failures)} 项未通过")
-    for f in failures:
-        print("  ✗ " + f)
-    sys.exit(1)
-print("结果：全部通过")
-print("=" * 74)
+sys.exit(smoke.summary())

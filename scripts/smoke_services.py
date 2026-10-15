@@ -18,6 +18,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/ 供 import _smoke
+import _smoke as smoke  # noqa: E402
+from _smoke import check, section  # noqa: E402
 
 from app import cache  # noqa: E402
 from app.config import settings  # noqa: E402
@@ -40,21 +43,9 @@ from app.service import profile_service as ps  # noqa: E402
 from app.service import simulation_service as sim  # noqa: E402
 from app.service.event import process_event  # noqa: E402
 
-OK, BAD = "  [OK]  ", "  [!!]  "
-failures: list[str] = []
 
 
-def check(cond: bool, msg: str) -> None:
-    print((OK if cond else BAD) + msg)
-    if not cond:
-        failures.append(msg)
 
-
-def section(title: str) -> None:
-    print()
-    print("=" * 74)
-    print(title)
-    print("=" * 74)
 
 
 def expect_error(fn, exc_type, msg: str):
@@ -71,8 +62,7 @@ def expect_error(fn, exc_type, msg: str):
 
 
 db = SessionLocal()
-for model in (RiskList, RiskListArchive, RiskAuditLog, RiskFeature, RiskAssessment,
-              RiskCase, RiskChallenge, RiskEvent, RiskUserProfile):
+for model in smoke.runtime_models():
     db.query(model).delete()
 db.commit()
 cache.invalidate_list()
@@ -288,12 +278,4 @@ for name, model in (("risk_event", RiskEvent), ("risk_feature", RiskFeature),
 db.close()
 
 # ============================================================
-print()
-print("=" * 74)
-if failures:
-    print(f"结果：{len(failures)} 项未通过")
-    for f in failures:
-        print("  ✗ " + f)
-    sys.exit(1)
-print("结果：全部通过")
-print("=" * 74)
+sys.exit(smoke.summary())

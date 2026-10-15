@@ -120,8 +120,16 @@ cp .env.example .env
 ### 4. 初始化数据（待 T-02~T-05 完成后可用）
 
 ```bash
-python scripts/init_db.py
+python scripts/init_db.py      # 建库 + 41 条规则 + 19 张业务只读表数据
+python scripts/seed_demo.py    # 预填最近 7 天的风控演示数据（可选，但强烈建议）
 ```
+
+`init_db.py` 只灌**业务侧**数据，风控运行表（事件 / 评估 / 案件 / 画像 / 名单）是空的，
+所以刚初始化完仪表盘全是 0、「近 7 天趋势」是一条空轴。
+
+`seed_demo.py` 用真实链路（特征 → 规则 → 决策 → 落库）造一批最近 7 天的数据：
+通过 / 标记 / 人工审核 / 拒绝四档齐全，带案件、名单条目与审计流水，
+并把时间戳回填到 7 天里 —— 仪表盘、案件管理、名单管理、审计日志、资损防护立刻有内容。
 
 ### 5. 启动服务
 
@@ -133,6 +141,19 @@ python -m app.main
 访问：
 - 健康检查 `http://localhost:8000/health`
 - 接口文档 `http://localhost:8000/docs`
+
+### 6. 自检（可选）
+
+```bash
+python scripts/smoke_all.py --seed
+```
+
+一键跑完 8 个冒烟脚本，覆盖 Agent 层（8 工具 / 会话持久化 / 流式 / 超时降级）、
+事件管道、决策引擎 + 9 个端到端场景、名单 / 案件 / 服务 / 接口层。
+只有 `smoke_agent_live.py` 会真实调用大模型（约 25 秒），其余不需要 `LLM_API_KEY`。
+
+跑完会自动执行 `init_db.py` 恢复基础数据；加 `--seed` 会紧接着跑 `seed_demo.py`，
+让界面直接回到有演示数据的状态。加 `--no-restore` 则保留脚本跑出来的数据供排查。
 
 ---
 

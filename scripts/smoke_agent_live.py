@@ -21,6 +21,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/ 供 import _smoke
+import _smoke as smoke  # noqa: E402
+from _smoke import check, section  # noqa: E402
 
 from langchain_core.messages import AIMessage, ToolMessage  # noqa: E402
 
@@ -33,21 +36,9 @@ from app.models import (  # noqa: E402
 )
 from app.service.event import process_event  # noqa: E402
 
-OK, BAD = "  [OK]  ", "  [!!]  "
-failures: list[str] = []
 
 
-def check(cond: bool, msg: str) -> None:
-    print((OK if cond else BAD) + msg)
-    if not cond:
-        failures.append(msg)
 
-
-def section(title: str) -> None:
-    print()
-    print("=" * 74)
-    print(title)
-    print("=" * 74)
 
 
 def used_tools(messages) -> list[str]:
@@ -57,8 +48,7 @@ def used_tools(messages) -> list[str]:
 
 # ---- 准备数据 ----
 db = SessionLocal()
-for model in (RiskList, RiskListArchive, RiskAuditLog, RiskFeature, RiskAssessment,
-              RiskCase, RiskChallenge, RiskEvent, RiskUserProfile):
+for model in smoke.runtime_models():
     db.query(model).delete()
 db.commit()
 db.close()
@@ -147,12 +137,4 @@ agent_chat.clear_session(session_id)
 check(agent_chat.load_history(session_id) == [], "清除后历史为空")
 check(agent_chat.cache.safe_get(cache_key) is None, "Redis 中的会话已删")
 
-print()
-print("=" * 74)
-if failures:
-    print(f"结果：{len(failures)} 项未通过")
-    for f in failures:
-        print("  ✗ " + f)
-    sys.exit(1)
-print("结果：全部通过")
-print("=" * 74)
+sys.exit(smoke.summary())

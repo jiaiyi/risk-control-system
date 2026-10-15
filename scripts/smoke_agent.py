@@ -16,7 +16,12 @@
     3. 工具内部**复用服务层**的证据（工具返回的内容与直接调服务层一致）
     4. 安全约束：query_business_data 拒绝任意 SQL、manage_blacklist 拒绝未知动作
     5. 会话持久化：save/load 往返、TTL、清除
-    6. LLM 未配置时的降级（明确报错而不是栈深处的鉴权失败）
+    6. **流式对话端到端（SSE）**：用桩模型顶掉真模型，验证结束帧带回 session_id、
+       一次请求只跑一遍 Agent、带上 session_id 后多轮上下文成立
+    7. LLM 未配置时的降级（明确报错而不是栈深处的鉴权失败）
+
+第 6 项是**唯一一条经过 HTTP 层跑 SSE 的用例** —— 之前只断言了流式路由「已注册」，
+真实流式请求从未被测试覆盖，两个 bug（session_id 丢失、Agent 跑两遍）就是这么漏掉的。
 """
 import json
 import sys
@@ -24,6 +29,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/ 供 import _smoke
+import _smoke as smoke  # noqa: E402
+from _smoke import check, section  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -46,21 +54,9 @@ from app.models import (  # noqa: E402
 )
 from app.service.event import process_event  # noqa: E402
 
-OK, BAD = "  [OK]  ", "  [!!]  "
-failures: list[str] = []
 
 
-def check(cond: bool, msg: str) -> None:
-    print((OK if cond else BAD) + msg)
-    if not cond:
-        failures.append(msg)
 
-
-def section(title: str) -> None:
-    print()
-    print("=" * 74)
-    print(title)
-    print("=" * 74)
 
 
 def call(tool, **kwargs) -> str:
@@ -77,8 +73,7 @@ def as_json(text: str):
 
 
 db = SessionLocal()
-for model in (RiskList, RiskListArchive, RiskAuditLog, RiskFeature, RiskAssessment,
-              RiskCase, RiskChallenge, RiskEvent, RiskUserProfile):
+for model in smoke.runtime_models():
     db.query(model).delete()
 db.commit()
 db.close()
@@ -168,6 +163,35 @@ out = call(ALL_TOOLS[3], action="新增", entity_type="用户", value="1002",
 check("失败" in out or "EXPIRE" in out,
       f"白名单无有效期被拦：{out[:60]}")
 
+# 工具必须能接收有效期，否则「先问用户要有效期」这条路走不通（问到了也没处填）
+body = as_json(call(ALL_TOOLS[3], action="新增", entity_type="用户", value="1002",
+                    list_type="白名单", reason="agent 加白（带有效期）",
+                    expire_time="2026-12-31", confirm=True))
+check(isinstance(body, dict) and body.get("list_id")
+      and str(body.get("expire_time", "")).startswith("2026-12-31"),
+      f"**带有效期的白名单能加上了**（list_id={body.get('list_id') if isinstance(body, dict) else body}）")
+
+# 移除必须只动指定颜色：同一主体可以黑白并存（互斥校验只拦「先黑后白」的加白动作），
+# 早先的实现查询里漏了 list_type，会把白名单条目一起删掉
+call(ALL_TOOLS[3], action="新增", entity_type="用户", value="1002",
+     list_type="黑名单", reason="隔离测试", confirm=True)
+body = as_json(call(ALL_TOOLS[3], action="移除", entity_type="用户", value="1002",
+                    list_type="黑名单", confirm=True))
+check(isinstance(body, dict) and len(body.get("removed", [])) == 1
+      and body["removed"][0]["list_type"] == "黑名单",
+      f"移除只返回黑名单条目（{len(body.get('removed', [])) if isinstance(body, dict) else body} 条）")
+
+_db = SessionLocal()
+_white_left = _db.query(RiskList).filter(
+    RiskList.entity_value == "1002", RiskList.entity_type == "用户",
+    RiskList.list_type == "白名单").count()
+_black_left = _db.query(RiskList).filter(
+    RiskList.entity_value == "1002", RiskList.entity_type == "用户",
+    RiskList.list_type == "黑名单").count()
+_db.close()
+check(_white_left == 1 and _black_left == 0,
+      f"**移除黑名单不误伤同主体的白名单**（白名单剩 {_white_left} 条、黑名单剩 {_black_left} 条）")
+
 out = call(ALL_TOOLS[3], action="乱写", entity_type="用户", value="1002")
 check("未知操作" in out, "未知 action 被拒绝（不静默失败）")
 
@@ -253,7 +277,7 @@ db.close()
 # ============================================================
 section("五、会话持久化（Redis，替代参考实现的进程内 dict）")
 
-sid = agent_chat._new_session_id()
+sid = agent_chat.new_session_id()
 check(sid.startswith("sess_"), f"会话 ID 生成：{sid[:24]}…")
 
 key = cache.agent_session_key(sid)
@@ -277,11 +301,175 @@ sessions = agent_chat.list_sessions()
 check(isinstance(sessions, list), f"会话列表可查（当前 {len(sessions)} 个）")
 
 # ============================================================
-section("六、LLM 未配置时的降级")
+section("六、流式对话端到端（SSE，桩模型，不依赖 LLM key）")
+#
+# 用桩模型顶掉真模型：不联网、不花钱、结果确定。
+# 这一段专盯两个「测试盲区」里的 bug：
+#   ① 结束帧必须带回 session_id —— 回 None 的话前端下一轮只能以 None 再发，
+#      后端又开新会话，表现为「流式对话完全没有多轮上下文」
+#   ② 一次请求只能跑一遍 Agent —— 早期实现在流式结束后又 invoke 了一遍，
+#      模型与工具调用全部翻倍（写操作会真的执行两次）
+from langchain.agents import create_agent  # noqa: E402
+from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E402
+from langchain_core.messages import AIMessage  # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
+
+
+class _StubChat(BaseChatModel):
+    """桩模型：每次生成返回固定文本，并累计调用次数"""
+
+    calls: int = 0
+
+    @property
+    def _llm_type(self) -> str:
+        return "stub"
+
+    def bind_tools(self, tools, **kwargs):   # create_react_agent 构造时会调
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        self.calls += 1
+        return ChatResult(generations=[ChatGeneration(
+            message=AIMessage(content=f"第 {self.calls} 次模型调用的回复"))])
+
+
+_stub = _StubChat()
+_stub_agent = create_agent(model=_stub, tools=[], system_prompt="冒烟用桩 Agent")
+_real_get_agent = agent_chat.get_agent
+agent_chat.get_agent = lambda: _stub_agent      # 顶掉全局单例
+
+
+def _sse(message: str, session_id) -> list[dict]:
+    """打一次 SSE 接口，把响应体解析成事件列表"""
+    r = client.post("/api/agent/chat/stream",
+                    json={"message": message, "session_id": session_id})
+    return [json.loads(line[6:]) for line in r.text.splitlines()
+            if line.startswith("data: ")]
+
+
+try:
+    ev1 = _sse("第一轮问题", None)
+    done1 = [e for e in ev1 if e.get("done")]
+    check(bool(done1), "流式返回了结束帧")
+
+    sid_stream = done1[0].get("session_id") if done1 else None
+    check(bool(sid_stream) and str(sid_stream).startswith("sess_"),
+          f"**结束帧带回 session_id**（{sid_stream}）—— 前端靠它维持多轮")
+    check(any(e.get("chunk") for e in ev1), "流式返回了文本片段")
+
+    calls_first = _stub.calls
+    check(calls_first == 1,
+          f"一次流式请求只跑一遍 Agent（模型调用 {calls_first} 次；翻倍会是 2）")
+
+    n1 = len(agent_chat.load_history(sid_stream))
+    check(n1 > 0, f"流式对话已落 Redis（{n1} 条消息）")
+
+    _sse("第二轮问题", sid_stream)
+    n2 = len(agent_chat.load_history(sid_stream))
+    check(n2 > n1, f"带上 session_id 后历史累积（{n1} → {n2}），多轮上下文成立")
+    check(_stub.calls == calls_first + 1,
+          f"第二轮同样只跑一遍（累计 {_stub.calls} 次）")
+
+    check(agent_chat.cache.safe_get(
+              agent_chat.cache.agent_session_key(sid_stream)) is not None,
+          "回传的 session_id 与 Redis 里的会话键一致（不是另开的一个）")
+
+    agent_chat.clear_session(sid_stream)
+finally:
+    agent_chat.get_agent = _real_get_agent
+
+# ============================================================
+section("七、LLM 超时 → SYS_LLM_TIMEOUT（本地桩服务，不联网）")
+#
+# 起一个「只接受连接、永不回包」的本地 socket，把模型指过去、timeout 设 1 秒，
+# 就能稳定复现真实超时：不依赖网络，也不用真等 60 秒。
+# 覆盖 SPEC 6.3 声明的 SYS_LLM_TIMEOUT —— 之前这个码只写在文档里，
+# 代码里超时被混进了笼统的 BIZ_AGENT_ERROR。
+import socket  # noqa: E402
+import threading  # noqa: E402
+
+import openai  # noqa: E402
+from langchain_openai import ChatOpenAI  # noqa: E402
+
+_srv = socket.socket()
+_srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+_srv.bind(("127.0.0.1", 0))
+_srv.listen(8)
+_port = _srv.getsockname()[1]
+_held: list = []
+
+
+def _accept_and_stall() -> None:
+    while True:
+        try:
+            conn, _ = _srv.accept()
+        except OSError:
+            return
+        _held.append(conn)          # 收下连接但永不响应 → 客户端读超时
+
+
+threading.Thread(target=_accept_and_stall, daemon=True).start()
+
+_slow_agent = create_agent(
+    model=ChatOpenAI(model="stub", api_key="sk-stub",
+                     base_url=f"http://127.0.0.1:{_port}/v1",
+                     timeout=1, max_retries=0),   # 不重试，否则要多等好几个 1 秒
+    tools=[], system_prompt="超时用桩 Agent",
+)
+agent_chat.get_agent = lambda: _slow_agent
+
+
+def _blank_session() -> str:
+    sid = agent_chat.new_session_id()
+    agent_chat.cache.safe_delete(agent_chat.cache.agent_session_key(sid))
+    return sid
+
+
+try:
+    # ① 服务层：异常类型、错误码、HTTP 状态
+    try:
+        agent_chat.chat("你好", session_id=_blank_session())
+        check(False, "超时应当抛异常，实际正常返回了")
+    except agent_chat.LLMTimeoutError as exc:
+        check(exc.code == "SYS_LLM_TIMEOUT" and exc.http_status == 504,
+              f"抛 LLMTimeoutError：码 {exc.code} / HTTP {exc.http_status}")
+    except Exception as exc:  # noqa: BLE001
+        check(False, f"抛了预期外的异常：{type(exc).__name__}: {exc}")
+
+    # ② 非流式接口要把 504 + 错误码透出去
+    r = client.post("/api/agent/chat", json={"message": "你好"})
+    check(r.status_code == 504 and r.json().get("code") == "SYS_LLM_TIMEOUT",
+          f"POST /api/agent/chat → {r.status_code} {r.json().get('code')}")
+
+    # ③ 流式接口：错误帧同样带码，且带回 session_id（超时后能接着这个会话重试）
+    err = [e for e in _sse("你好", None) if e.get("error")]
+    check(bool(err) and err[0].get("code") == "SYS_LLM_TIMEOUT",
+          f"SSE 错误帧带 code={err[0].get('code') if err else '（无错误帧）'}")
+    check(bool(err) and err[0].get("session_id"),
+          "SSE 错误帧同时带回 session_id")
+
+    # ④ 判定逻辑本身：普通异常不能误判，被包一层的超时也要认出来
+    check(not agent_chat._is_timeout_error(ValueError("普通错误")),
+          "普通异常不会被误判为超时")
+    _wrapped = RuntimeError("外层包装")
+    _wrapped.__cause__ = openai.APITimeoutError(None)
+    check(agent_chat._is_timeout_error(_wrapped),
+          "被外层包住的超时仍能识别（走 __cause__ 链）")
+finally:
+    agent_chat.get_agent = _real_get_agent
+    _srv.close()
+    for _c in _held:
+        try:
+            _c.close()
+        except OSError:
+            pass
+
+# ============================================================
+section("八、LLM 未配置时的降级")
 
 if not settings.LLM_API_KEY:
     try:
-        agent_chat.chat("你好", session_id=agent_chat._new_session_id())
+        agent_chat.chat("你好", session_id=agent_chat.new_session_id())
         check(False, "LLM 未配置时应抛错而不是硬跑")
     except agent_chat.LLMNotConfiguredError as exc:
         check(exc.http_status == 503 and exc.code == "SYS_LLM_NOT_CONFIGURED",
@@ -304,15 +492,7 @@ r = client.get("/api/agent/sessions")
 check(r.status_code == 200 and "total" in r.json(), "会话列表接口可用")
 
 # ============================================================
-print()
-print("=" * 74)
-if failures:
-    print(f"结果：{len(failures)} 项未通过")
-    for f in failures:
-        print("  ✗ " + f)
-    sys.exit(1)
-print("结果：全部通过")
-print("=" * 74)
+sys.exit(smoke.summary())
 
 if not settings.LLM_API_KEY:
     print()

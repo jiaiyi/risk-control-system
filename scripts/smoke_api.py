@@ -21,6 +21,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # scripts/ 供 import _smoke
+import _smoke as smoke  # noqa: E402
+from _smoke import check, section  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -39,27 +42,14 @@ from app.models import (  # noqa: E402
     RiskUserProfile,
 )
 
-OK, BAD = "  [OK]  ", "  [!!]  "
-failures: list[str] = []
 
 
-def check(cond: bool, msg: str) -> None:
-    print((OK if cond else BAD) + msg)
-    if not cond:
-        failures.append(msg)
 
-
-def section(title: str) -> None:
-    print()
-    print("=" * 74)
-    print(title)
-    print("=" * 74)
 
 
 # ---- 清表（保留 41 条预置规则）----
 db = SessionLocal()
-for model in (RiskList, RiskListArchive, RiskAuditLog, RiskFeature, RiskAssessment,
-              RiskCase, RiskChallenge, RiskEvent, RiskUserProfile):
+for model in smoke.runtime_models():
     db.query(model).delete()
 db.commit()
 db.close()
@@ -454,12 +444,4 @@ for name, model in (("risk_event", RiskEvent), ("risk_assessment", RiskAssessmen
 db.close()
 
 # ============================================================
-print()
-print("=" * 74)
-if failures:
-    print(f"结果：{len(failures)} 项未通过")
-    for f in failures:
-        print("  ✗ " + f)
-    sys.exit(1)
-print("结果：全部通过")
-print("=" * 74)
+sys.exit(smoke.summary())
