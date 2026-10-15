@@ -7,8 +7,9 @@
   <title>{% block title %}仪表盘{% endblock %} · 电商风控系统</title>
 
   <!-- 本地 vendor 优先，避免演示时网络不可用 -->
-  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
-  <link rel="stylesheet" href="/static/css/app.css">
+  <!-- ?v={{ asset_v() }} 是缓存击穿：URL 随文件内容变，浏览器不会拿旧 JS -->
+  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css?v={{ asset_v() }}">
+  <link rel="stylesheet" href="/static/css/app.css?v={{ asset_v() }}">
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -17,27 +18,30 @@
 
 {#
   导航定义（数据驱动，不再手写 10 个 <a>）。
-  每项： (active 标识, 链接, 图标名, 中文标签)
-  分组标题在折叠态会退化成一条分隔线。
+  每项： (active 标识, 链接, 图标名, 中文标签, 所需权限)
+  **第 5 项权限码是必须的** —— 渲染时按当前用户权限过滤，没有权限的菜单项
+  直接不显示（而不是显示后点了报 403，那样体验与信息泄露都更差）。
+  后端 app/main.py 的 PAGE_PERMISSIONS 是同一套口径的强制拦截，
+  前端隐藏只是体验优化，不作为安全边界。
 #}
 {% set NAV_GROUPS = [
   ("监控", [
-    ("dashboard",  "/",           "dashboard",    "仪表盘"),
-    ("risk-check", "/risk-check", "shield-alert", "风险检查"),
+    ("dashboard",  "/",           "dashboard",    "仪表盘",   "dashboard:view"),
+    ("risk-check", "/risk-check", "shield-alert", "风险检查", "risk:check"),
   ]),
   ("策略", [
-    ("rules",      "/rules",      "list",        "规则管理"),
-    ("simulation", "/simulation", "flask",       "规则仿真"),
-    ("lists",      "/lists",      "list-checks", "名单管理"),
+    ("rules",      "/rules",      "list",        "规则管理", "rules:view"),
+    ("simulation", "/simulation", "flask",       "规则仿真", "simulation:run"),
+    ("lists",      "/lists",      "list-checks", "名单管理", "lists:view"),
   ]),
   ("运营", [
-    ("cases", "/cases", "briefcase", "案件管理"),
-    ("graph", "/graph", "network",   "关联图谱"),
-    ("chat",  "/chat",  "sparkles",  "AI 助手"),
+    ("cases", "/cases", "briefcase", "案件管理", "cases:view"),
+    ("graph", "/graph", "network",   "关联图谱", "graph:view"),
+    ("chat",  "/chat",  "sparkles",  "AI 助手",  "agent:use"),
   ]),
   ("系统", [
-    ("audit",    "/audit",    "file-text", "审计日志"),
-    ("settings", "/settings", "settings",  "系统配置"),
+    ("audit",    "/audit",    "file-text", "审计日志", "audit:view"),
+    ("settings", "/settings", "settings",  "系统配置", "settings:manage"),
   ]),
 ] %}
 
@@ -55,23 +59,33 @@
 
     <nav class="side-nav">
       {% for group, items in NAV_GROUPS %}
+      {# 先把该组里有权限的项挑出来；一组全被过滤掉时连组标题也不显示，
+         否则会出现「系统」这种空标题挂在侧边栏上 #}
+      {% set visible = items | selectattr(4, 'in', user_perms) | list %}
+      {% if visible %}
       <div class="side-nav-group">{{ group }}</div>
-      {% for key, href, ic, label in items %}
+      {% for key, href, ic, label, perm in visible %}
       <a class="side-nav-item {% if active == key %}active{% endif %}"
          href="{{ href }}" data-label="{{ label }}"
          {% if active == key %}aria-current="page"{% endif %}>
         {{ ui.icon(ic, 18) }}<span>{{ label }}</span>
       </a>
       {% endfor %}
+      {% endif %}
       {% endfor %}
     </nav>
 
     <div class="sidebar-footer">
-      <div class="avatar">张</div>
+      <div class="avatar">{{ user.initial if user else "?" }}</div>
       <div class="user-meta">
-        <div class="uname">张晨曦</div>
-        <div class="urole">风控策略师</div>
+        <div class="uname">{{ user.name if user else "未登录" }}</div>
+        <div class="urole">{{ user.role if user else "—" }}</div>
       </div>
+      <form method="post" action="/logout" class="logout-form">
+        <button type="submit" class="icon-btn logout-btn" title="退出登录" aria-label="退出登录">
+          {{ ui.icon('log-out', 16) }}
+        </button>
+      </form>
     </div>
   </aside>
 
@@ -96,7 +110,7 @@
         <button class="icon-btn has-dot" title="通知" aria-label="通知">
           {{ ui.icon('bell', 16) }}
         </button>
-        <div class="avatar avatar-sm">张</div>
+        <div class="avatar avatar-sm">{{ user.initial if user else "?" }}</div>
       </div>
     </header>
 
@@ -110,9 +124,9 @@
 <div id="toast" class="toast-box" role="status" aria-live="polite"></div>
 
 <script>{{ ui.js_paths() }}</script>
-<script src="/static/vendor/bootstrap.bundle.min.js"></script>
-<script src="/static/vendor/echarts.min.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/vendor/bootstrap.bundle.min.js?v={{ asset_v() }}"></script>
+<script src="/static/vendor/echarts.min.js?v={{ asset_v() }}"></script>
+<script src="/static/js/app.js?v={{ asset_v() }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

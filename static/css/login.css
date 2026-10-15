@@ -1,0 +1,450 @@
+/* ==========================================================================
+   登录页样式 —— **独立于 app.css 的布局体系**
+
+   app.css 里 `.app-shell` 是「侧边栏 + 内容区」两栏网格，登录页没有侧边栏，
+   所以整页另起一套。设计变量（--c-primary / --radius / --shadow-lg 等）
+   仍从 app.css 继承，保证配色与主应用一致。
+
+   ⚠ 本文件被 templates/login.html 与「无权访问」错误页共用
+     （错误页用的是 .auth-error-* 那几个类）。
+   ========================================================================== */
+
+.login-body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--c-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  color: var(--c-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.login-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ======================= 左侧品牌区 ======================= */
+.login-brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 56px 60px;
+  background:
+    radial-gradient(1000px 520px at -10% -10%, rgba(37, 99, 235, .28), transparent 60%),
+    radial-gradient(760px 420px at 110% 110%, rgba(8, 145, 178, .22), transparent 60%),
+    linear-gradient(160deg, #0f172a 0%, #16233b 60%, #0b1220 100%);
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+/* 右上角一圈极淡的同心圆，纯装饰，避免大块纯色显得空 */
+.login-brand::after {
+  content: "";
+  position: absolute;
+  right: -140px;
+  top: -140px;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  border: 1px solid rgba(226, 232, 240, .10);
+  box-shadow: 0 0 0 60px rgba(226, 232, 240, .04),
+              0 0 0 130px rgba(226, 232, 240, .025);
+  pointer-events: none;
+}
+
+.login-brand .brand-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.login-brand .logo-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--c-primary), #0ea5e9);
+  color: #fff;
+  font-size: 19px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, .45);
+}
+
+.login-brand .logo-text .name {
+  font-size: 16.5px;
+  font-weight: 650;
+  letter-spacing: .3px;
+  color: #f8fafc;
+}
+
+.login-brand .logo-text .ver {
+  font-size: 11.5px;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+.brand-headline {
+  margin: 62px 0 0;
+  font-size: 34px;
+  line-height: 1.34;
+  font-weight: 700;
+  letter-spacing: -.4px;
+  color: #f8fafc;
+}
+
+.brand-sub {
+  margin: 18px 0 0;
+  max-width: 420px;
+  font-size: 13.5px;
+  line-height: 2;
+  color: #94a3b8;
+}
+
+.brand-points {
+  list-style: none;
+  margin: 34px 0 0;
+  padding: 0;
+  max-width: 440px;
+}
+
+.brand-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.9;
+  color: #cbd5e1;
+  margin-bottom: 9px;
+}
+
+.brand-points .dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--c-primary);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, .18);
+}
+
+.brand-foot {
+  margin-top: auto;
+  padding-top: 40px;
+  font-size: 12px;
+  color: #475569;
+  letter-spacing: .3px;
+}
+
+/* ======================= 右侧表单区 ======================= */
+.login-panel {
+  display: grid;
+  place-items: center;
+  padding: 40px 32px;
+  overflow-y: auto;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 396px;
+}
+
+.login-title {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -.3px;
+}
+
+.login-desc {
+  margin: 8px 0 26px;
+  font-size: 13px;
+  color: var(--c-text-2);
+  line-height: 1.7;
+}
+
+.login-error {
+  margin-bottom: 18px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: var(--c-critical);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-text-2);
+}
+
+.field-input {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-card);
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.field-input:focus-within {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+}
+
+.field-input .icon {
+  flex: 0 0 auto;
+  color: var(--c-text-3);
+}
+
+.field-input:focus-within .icon {
+  color: var(--c-primary);
+}
+
+.field-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14px;
+  color: var(--c-text);
+  font-family: inherit;
+}
+
+.field-input input::placeholder {
+  color: var(--c-text-3);
+  font-size: 13px;
+}
+
+.login-submit {
+  width: 100%;
+  height: 44px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--c-primary), var(--c-primary-dark));
+  color: #fff;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, .28);
+  transition: transform .12s, box-shadow .15s, filter .15s;
+}
+
+.login-submit:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 8px 22px rgba(37, 99, 235, .34);
+}
+
+.login-submit:active {
+  transform: translateY(1px);
+}
+
+/* ======================= 演示账号 ======================= */
+.demo-accounts {
+  margin-top: 30px;
+  padding-top: 22px;
+  border-top: 1px dashed var(--c-border);
+}
+
+.demo-title {
+  font-size: 12.5px;
+  color: var(--c-text-2);
+  margin-bottom: 12px;
+}
+
+.demo-title code {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--c-primary-light);
+  color: var(--c-primary-dark);
+  font-size: 12px;
+}
+
+.demo-list {
+  display: grid;
+  gap: 7px;
+}
+
+.demo-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-card);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .12s;
+  font-family: inherit;
+}
+
+.demo-item:hover {
+  border-color: var(--c-primary);
+  background: #f8fafc;
+  transform: translateX(2px);
+}
+
+.demo-item.active {
+  border-color: var(--c-primary);
+  background: var(--c-primary-light);
+}
+
+.demo-avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #475569, #1e293b);
+}
+
+.demo-item.active .demo-avatar {
+  background: linear-gradient(135deg, var(--c-primary), var(--c-primary-dark));
+}
+
+.demo-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.demo-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.demo-role {
+  font-size: 11.5px;
+  color: var(--c-text-3);
+}
+
+.demo-uid {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--c-text-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.demo-note {
+  margin: 13px 0 0;
+  font-size: 11.5px;
+  line-height: 1.8;
+  color: var(--c-text-3);
+}
+
+/* ======================= 侧边栏登出按钮 ======================= */
+.logout-form {
+  margin: 0 0 0 auto;
+}
+
+.logout-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.logout-btn:hover {
+  background: rgba(148, 163, 184, .16);
+  color: #fca5a5;
+}
+
+/* ======================= 403 / 503 错误页 ======================= */
+.auth-error-body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--c-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Microsoft YaHei", sans-serif;
+  color: var(--c-text);
+}
+
+.auth-error-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 34px 32px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-card);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.auth-error-code {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--c-critical);
+  margin-bottom: 12px;
+}
+
+.auth-error-msg {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: var(--c-text-2);
+}
+
+.auth-error-card .hint {
+  margin: 0 0 20px;
+  font-size: 12px;
+  color: var(--c-text-3);
+  line-height: 1.8;
+}
+
+/* ======================= 窄屏兜底 ======================= */
+@media (max-width: 900px) {
+  .login-wrap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 窄屏把品牌区压缩成一条横幅，别让登录表单被挤到屏幕外 */
+  .login-brand {
+    padding: 26px 24px;
+  }
+
+  .brand-headline,
+  .brand-sub,
+  .brand-points,
+  .brand-foot {
+    display: none;
+  }
+
+  .login-panel {
+    padding: 28px 22px 48px;
+  }
+}

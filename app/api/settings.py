@@ -4,9 +4,10 @@
 两个前缀（`/settings` 与 `/health`）分属两个 router，
 在 `main.py` 里分别注册（FastAPI 的 APIRouter 只能带一个 prefix）。
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from app.auth import operator_of
 from app.database import get_db
 from app.schemas import CachePolicyUpdateRequest, ThresholdUpdateRequest
 from app.service import settings_service
@@ -30,10 +31,10 @@ def get_thresholds() -> dict:
 @router.put("/thresholds", summary="在线调整阈值与引擎参数（API-47）",
             description="FR-56：变更**强制写审计**（记录前后值），并持久化到 "
                         "`data/runtime_settings.json`（重启后仍然生效）")
-def update_thresholds(payload: ThresholdUpdateRequest,
+def update_thresholds(payload: ThresholdUpdateRequest, request: Request,
                       db: Session = Depends(get_db)) -> dict:
     data = payload.model_dump(exclude_none=True)
-    operator = data.pop("operator", "admin")
+    operator = data.pop("operator", None) or operator_of(request)
     return settings_service.update_thresholds(db, data, operator=operator)
 
 
@@ -43,10 +44,10 @@ def get_cache_policy() -> dict:
 
 
 @router.put("/cache-policy", summary="调整缓存开关与 TTL（API-49）")
-def update_cache_policy(payload: CachePolicyUpdateRequest,
+def update_cache_policy(payload: CachePolicyUpdateRequest, request: Request,
                         db: Session = Depends(get_db)) -> dict:
     data = payload.model_dump(exclude_none=True)
-    operator = data.pop("operator", "admin")
+    operator = data.pop("operator", None) or operator_of(request)
     return settings_service.update_cache_policy(db, data, operator=operator)
 
 
@@ -70,9 +71,9 @@ def list_tasks() -> dict:
 
 @health_router.post("/tasks/{task}/run", summary="手动触发运维任务（API-52）",
                     description="可用任务：归档过期名单 / 预热缓存 / 健康检查 / 清理缓存")
-def run_task(task: str, operator: str = Query("admin"),
+def run_task(task: str, request: Request, operator: str | None = Query(None),
              db: Session = Depends(get_db)) -> dict:
-    result = settings_service.run_task(db, task, operator=operator)
+    result = settings_service.run_task(db, task, operator=operator or operator_of(request))
     if task in ("归档过期名单", "清理缓存"):
         from app.service import dashboard_service
         dashboard_service.invalidate_overview_cache()

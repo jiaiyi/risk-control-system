@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+{#
+  ============================================================
+  登录页 —— **刻意不继承 base.html**
+
+  原因：base.html 带侧边栏、顶栏、导航与登出按钮，那是「已登录」的框架。
+  让登录页继承它，等于在未登录时先渲染一套需要用户信息的骨架
+  （侧边栏过滤与用户栏都要写 `{% if user %}` 兜底），既绕又容易在
+  鉴权守卫上打转。这里独立成页，样式复用 app.css 的设计变量。
+  ============================================================
+#}
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · 电商风控系统</title>
+<link rel="stylesheet" href="/static/vendor/bootstrap.min.css?v={{ asset_v() }}">
+<link rel="stylesheet" href="/static/css/app.css?v={{ asset_v() }}">
+<link rel="stylesheet" href="/static/css/login.css?v={{ asset_v() }}">
+</head>
+<body class="login-body">
+
+<div class="login-wrap">
+
+  <!-- ============ 左侧品牌面板 ============ -->
+  <section class="login-brand">
+    <div class="brand-top">
+      <div class="logo-mark">盾</div>
+      <div class="logo-text">
+        <div class="name">电商风控系统</div>
+        <div class="ver">AI Risk v1.3</div>
+      </div>
+    </div>
+
+    <h1 class="brand-headline">规则可审计的<br>实时交易风控</h1>
+    <p class="brand-sub">
+      41 条预置规则、43 项风险特征、三色名单与关联图谱，
+      为下单、支付、领券、登录等 6 类事件提供毫秒级决策。
+    </p>
+
+    <ul class="brand-points">
+      <li><span class="dot"></span>决策全链路留痕，可回放到每一条命中规则</li>
+      <li><span class="dot"></span>黑 / 白 / 灰三色名单，冲突自动转人工审核</li>
+      <li><span class="dot"></span>按角色划分功能边界，操作人写入审计日志</li>
+    </ul>
+
+    <div class="brand-foot">尚硅谷大模型课程 · 项目实战 4</div>
+  </section>
+
+  <!-- ============ 右侧登录表单 ============ -->
+  <section class="login-panel">
+    <div class="login-card">
+      <h2 class="login-title">登录</h2>
+      <p class="login-desc">请使用风控账号登录，不同角色可见的功能不同。</p>
+
+      {% if error %}
+      <div class="login-error" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/login" autocomplete="off" id="loginForm">
+        {# next 只允许站内路径，服务端 _safe_next() 已过滤一次；
+           这里再作为隐藏域回传，保证登录后跳回原页面 #}
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <label class="field">
+          <span class="field-label">账号</span>
+          <span class="field-input">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.75" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+            <input type="text" name="user_id" id="userId" value="{{ user_id }}"
+                   placeholder="如 zhangcx" required autofocus
+                   aria-label="账号">
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">密码</span>
+          <span class="field-input">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.75" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <input type="password" name="password" id="password"
+                   placeholder="演示环境统一口令：{{ password_hint }}"
+                   required aria-label="密码">
+          </span>
+        </label>
+
+        <button type="submit" class="login-submit">登 录</button>
+      </form>
+
+      {# 演示账号一键填充：这是本地演示环境，没有真实用户库，
+         把账号摆在明面上比让人去翻 README 更省事。生产环境务必删掉。 #}
+      <div class="demo-accounts">
+        <div class="demo-title">
+          演示账号（点击填充，口令统一为 <code>{{ password_hint }}</code>）
+        </div>
+        <div class="demo-list">
+          {% for acc in demo_accounts %}
+          <button type="button" class="demo-item" data-uid="{{ acc.user_id }}"
+                  title="{{ acc.title }}">
+            <span class="demo-avatar">{{ acc.initial }}</span>
+            <span class="demo-meta">
+              <span class="demo-name">{{ acc.name }}</span>
+              <span class="demo-role">{{ acc.role }}</span>
+            </span>
+            <span class="demo-uid">{{ acc.user_id }}</span>
+          </button>
+          {% endfor %}
+        </div>
+        <p class="demo-note">
+          提示：本系统按角色限制功能。用「审计人员」登录只能看规则与日志而无法修改，
+          用「系统管理员」登录才能进入系统配置。
+        </p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  // 演示账号一键填充。口令直接写在这里是因为它本来就在页面提示里
+  // （password_hint），并非额外泄露；生产环境整个 .demo-accounts 块都不该存在。
+  (function () {
+    var HINT = {{ password_hint | tojson }};
+    document.querySelectorAll('.demo-item').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.getElementById('userId').value = btn.dataset.uid;
+        document.getElementById('password').value = HINT;
+        document.querySelectorAll('.demo-item').forEach(function (b) {
+          b.classList.toggle('active', b === btn);
+        });
+        document.getElementById('loginForm').requestSubmit();
+      });
+    });
+  })();
+</script>
+</body>
+</html>

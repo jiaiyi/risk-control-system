@@ -66,6 +66,39 @@ def summary() -> int:
 # ============================================================
 # 数据准备
 # ============================================================
+def auth_client(role_or_user: str = "风控策略师", *, follow_redirects: bool = False):
+    """返回一个**已登录**的 TestClient。
+
+    **为什么必须有这个函数**：`app/main.py` 的鉴权中间件默认拦住所有 `/api/*`
+    与页面路径。用裸 `TestClient(app)` 转发请求会拿到 401 —— 而这**不是**接口
+    坏了，是没登录。脚本里断言 `status_code == 200` 时只会看到「期望 200 实际 401」，
+    很容易误判成回归。
+
+    传角色名（如 `风控策略师`）或账号（如 `zhangcx`）都行。默认给策略师 ——
+    它是权限最全的角色，除系统配置与健康度外基本都能访问。
+    """
+    from fastapi.testclient import TestClient  # noqa: PLC0415
+
+    from app import auth  # noqa: PLC0415
+    from app.main import app  # noqa: PLC0415
+
+    user_id = role_or_user
+    for u in auth.all_users():
+        if role_or_user in (u.user_id, u.role, u.name):
+            user_id = u.user_id
+            break
+
+    client = TestClient(app, follow_redirects=follow_redirects)
+    resp = client.post(
+        "/api/auth/login",
+        json={"user_id": user_id, "password": auth._DEMO_PASSWORD},
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"冒烟脚本登录失败（{user_id}）→ {resp.status_code} {resp.text[:200]}")
+    return client
+
+
 def runtime_models():
     """需要清空的风控运行表（**单一来源**，各脚本不要再各抄一份）。
 

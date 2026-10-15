@@ -92,7 +92,9 @@ for uid, etype, src, dev, ip in (
 # ============================================================
 section("一、路由注册（API-28/29 + 2 个增强）")
 
-client = TestClient(app)
+# ⚠ 必须用已登录的 client —— app/main.py 的鉴权中间件会拦下所有 /api/*，
+#   裸 TestClient(app) 转发会拿到 401，看起来像 Agent 接口坏了。
+client = smoke.auth_client()
 agent_paths = sorted({r.path for r in app.routes if r.path.startswith("/api/agent")})
 print(f"  {agent_paths}")
 for must in ("/api/agent/chat", "/api/agent/clear", "/api/agent/chat/stream",

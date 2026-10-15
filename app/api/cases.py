@@ -4,9 +4,10 @@
 审核接口（API-12）含**处置回写业务系统**，是本项目与参考实现差异最大的地方之一。
 回写失败时 HTTP 仍返回 **200**，由响应体 `writeback.success=false` 表达（SPEC 6.3 约定 2）。
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from app.auth import operator_of
 from app.database import get_db
 from app.schemas import CaseReviewRequest
 from app.service import case_service
@@ -53,14 +54,18 @@ def case_detail(case_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/{case_id}/review", summary="案件审核（API-12，含处置回写）")
-def review_case(case_id: str, payload: CaseReviewRequest,
+def review_case(case_id: str, payload: CaseReviewRequest, request: Request,
                 db: Session = Depends(get_db)) -> dict:
     """处置流程：更新案件 → 可选加黑名单 → **回写业务表** → 审计（同一事务）
 
     回写失败 → 事务回滚、案件状态不推进，HTTP 仍 200 + `writeback.success=false`。
+
+    审核人优先取请求体（脚本/测试可显式指定），否则从会话取真实登录用户。
     """
     result = case_service.review_case(
-        db, case_id=case_id, decision=payload.decision, reviewer=payload.reviewer,
+        db, case_id=case_id,
+        decision=payload.decision,
+        reviewer=payload.reviewer or operator_of(request),
         review_comment=payload.review_comment,
         add_to_blacklist=payload.add_to_blacklist,
         blacklist_entity_types=payload.blacklist_entity_types,

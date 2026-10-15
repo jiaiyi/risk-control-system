@@ -4,9 +4,10 @@
 覆盖：列表 / 详情 / 新增 / 编辑（部分更新）/ 启停 / **逻辑删除** / 条件校验。
 规则变更都会失效规则缓存，下一次检查立即生效（NFR-17 热更新）。
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from app.auth import operator_of
 from app.database import get_db
 from app.engine.rule import validate_condition
 from app.schemas import (
@@ -63,31 +64,36 @@ def get_rule(rule_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("", status_code=201, summary="新增规则（API-04）")
-def create_rule(payload: RuleCreateRequest, db: Session = Depends(get_db)) -> dict:
-    rule = rule_service.create_rule(db, payload.model_dump(), operator="admin")
+def create_rule(payload: RuleCreateRequest, request: Request,
+                db: Session = Depends(get_db)) -> dict:
+    # 操作人取登录用户（鉴权落地后审计字段自动生效，见 PRD.md:110）
+    rule = rule_service.create_rule(db, payload.model_dump(),
+                                    operator=operator_of(request))
     return rule_service.to_dict(rule)
 
 
 @router.put("/{rule_id}", summary="编辑规则（API-05，部分更新）")
-def update_rule(rule_id: str, payload: RuleUpdateRequest,
+def update_rule(rule_id: str, payload: RuleUpdateRequest, request: Request,
                 db: Session = Depends(get_db)) -> dict:
     data = payload.model_dump(exclude_none=True)
-    operator = data.pop("operator", "admin")
+    # 请求体里的 operator 优先（脚本/测试可显式指定），否则用登录用户
+    operator = data.pop("operator", None) or operator_of(request)
     rule = rule_service.update_rule(db, rule_id, data, operator=operator)
     return rule_service.to_dict(rule)
 
 
 @router.put("/{rule_id}/toggle", summary="启停规则（API-06）")
-def toggle_rule(rule_id: str, payload: RuleToggleRequest,
+def toggle_rule(rule_id: str, payload: RuleToggleRequest, request: Request,
                 db: Session = Depends(get_db)) -> dict:
-    rule = rule_service.toggle_rule(db, rule_id, payload.is_enabled, operator=payload.operator)
+    rule = rule_service.toggle_rule(db, rule_id, payload.is_enabled,
+                                    operator=payload.operator or operator_of(request))
     return rule_service.to_dict(rule)
 
 
 @router.delete("/{rule_id}", summary="逻辑删除规则（API-07）",
                description="FR-12：不物理删除 —— 历史评估的命中明细仍引用这些规则 ID。")
-def delete_rule(rule_id: str, operator: str = Query("admin"),
+def delete_rule(rule_id: str, request: Request, operator: str | None = Query(None),
                 db: Session = Depends(get_db)) -> dict:
-    rule = rule_service.delete_rule(db, rule_id, operator=operator)
+    rule = rule_service.delete_rule(db, rule_id, operator=operator or operator_of(request))
     return {"rule_id": rule.rule_id, "is_deleted": rule.is_deleted,
             "message": "已逻辑删除，历史案件仍可追溯该规则"}

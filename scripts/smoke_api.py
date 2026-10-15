@@ -54,7 +54,16 @@ for model in smoke.runtime_models():
 db.commit()
 db.close()
 
-client = TestClient(app)
+# ⚠ 必须用已登录的 client —— app/main.py 的鉴权中间件会拦下所有 /api/*，
+#   裸 TestClient(app) 转发会拿到 401，看起来像接口坏了。
+client = smoke.auth_client()
+# 案件审核（API-12）需要 cases:review，按 PRD 只有风控审核员有 ——
+# 用策略师的 client 打审核接口会拿到 403，响应体里没有 case_status，
+# 表现为 KeyError: 'case_status'（不是接口坏了，是角色不对）。
+reviewer_client = smoke.auth_client("风控审核员")
+# 配置（API-46~49）与健康度（API-50~52）按 PRD.md:107-108 只属于系统管理员；
+# 读取阈值审计人员也能（settings:view），但运维任务只有管理员有 health:view。
+admin_client = smoke.auth_client("系统管理员")
 
 # ============================================================
 section("一、路由注册（SPEC 6.1）")
@@ -270,7 +279,7 @@ r = client.get("/api/cases/cas_not_exist")
 check(r.status_code == 404 and r.json()["code"] == "BIZ_CASE_NOT_FOUND",
       f"案件不存在 → 404 + BIZ_CASE_NOT_FOUND（{r.status_code}）")
 
-r = client.post(f"/api/cases/{case_id}/review", json={
+r = reviewer_client.post(f"/api/cases/{case_id}/review", json={
     "decision": "已拒绝", "reviewer": "reviewer_api",
     "review_comment": "接口层测试", "add_to_blacklist": True,
     "blacklist_entity_types": ["用户"]})
@@ -279,7 +288,7 @@ check(r.status_code == 200 and body["case_status"] == "已拒绝",
       f"审核通过（{body['case_status']}），回写={body['writeback'].get('action')}")
 check(body["audit_log_id"] is not None, f"响应返回 audit_log_id（{body['audit_log_id']}）")
 
-r = client.post(f"/api/cases/{case_id}/review", json={"decision": "已通过", "reviewer": "x"})
+r = reviewer_client.post(f"/api/cases/{case_id}/review", json={"decision": "已通过", "reviewer": "x"})
 check(r.status_code == 409 and r.json()["code"] == "BIZ_CASE_STATE_INVALID",
       f"重复处置被拦（{r.status_code}）")
 
@@ -342,28 +351,30 @@ check(r.status_code == 405, f"审计不提供修改接口（PUT 返回 {r.status
 # ============================================================
 section("七、API-46~52 配置与健康度")
 
-r = client.get("/api/settings/thresholds")
+# 全部走系统管理员的 client：阈值调整（settings:manage）、运维任务（health:view）
+# 按 PRD.md:107-108 都只属于系统管理员，用策略师会拿到 403。
+r = admin_client.get("/api/settings/thresholds")
 before = r.json()["thresholds"]
 check(r.status_code == 200 and "RISK_PASS_THRESHOLD" in before, f"读取阈值：{before['RISK_PASS_THRESHOLD']}")
 
-r = client.put("/api/settings/thresholds", json={"RISK_PASS_THRESHOLD": 25, "operator": "tester"})
+r = admin_client.put("/api/settings/thresholds", json={"RISK_PASS_THRESHOLD": 25, "operator": "tester"})
 body = r.json()
 check(r.status_code == 200 and body["before"]["RISK_PASS_THRESHOLD"] == before["RISK_PASS_THRESHOLD"],
       f"调整阈值并记录变更前值（{body['before']['RISK_PASS_THRESHOLD']} → {body['after']['RISK_PASS_THRESHOLD']}）")
 r = client.get("/api/audit-logs", params={"action_type": "配置"})
 check(r.json()["total"] >= 1, f"配置类变更已写审计（{r.json()['total']} 条）")
 
-r = client.put("/api/settings/thresholds", json={"RISK_PASS_THRESHOLD": 90})
+r = admin_client.put("/api/settings/thresholds", json={"RISK_PASS_THRESHOLD": 90})
 check(r.status_code == 400 and "阈值顺序非法" in r.json()["message"],
       f"阈值顺序非法被拦：{r.json()['message'][:32]}")
-client.put("/api/settings/thresholds", json={"RISK_PASS_THRESHOLD": before["RISK_PASS_THRESHOLD"]})
+admin_client.put("/api/settings/thresholds", json={"RISK_PASS_THRESHOLD": before["RISK_PASS_THRESHOLD"]})
 
-r = client.get("/api/settings/cache-policy")
+r = admin_client.get("/api/settings/cache-policy")
 check(r.status_code == 200 and "REDIS_ENABLED" in r.json(), f"缓存策略读取（available={r.json()['available']}）")
-r = client.get("/api/settings/runtime-overrides")
+r = admin_client.get("/api/settings/runtime-overrides")
 check(r.status_code == 200 and "overrides" in r.json(), "运行时覆盖项可查")
 
-r = client.get("/api/health/metrics")
+r = admin_client.get("/api/health/metrics")
 m = r.json()
 check(r.status_code == 200 and "performance" in m, "健康度指标可用")
 check(m["performance"]["requests"] > 0,
@@ -373,13 +384,13 @@ check("hit_rate" in m["cache"], f"缓存命中率 {m['cache']['hit_rate']}")
 check(m["dependencies"]["mysql"] is True, "MySQL 依赖健康")
 check("by_path" in m["performance"], f"耗时分解按路径统计（{len(m['performance']['by_path'])} 组）")
 
-r = client.get("/api/health/tasks")
+r = admin_client.get("/api/health/tasks")
 check(r.status_code == 200 and len(r.json()["tasks"]) >= 3,
       f"运维任务列表：{[t['name'] for t in r.json()['tasks']]}")
-r = client.post("/api/health/tasks/健康检查/run")
+r = admin_client.post("/api/health/tasks/健康检查/run")
 check(r.status_code == 200 and "elapsed_ms" in r.json(),
       f"手动触发健康检查（{r.json()['elapsed_ms']}ms）")
-r = client.post("/api/health/tasks/不存在的任务/run")
+r = admin_client.post("/api/health/tasks/不存在的任务/run")
 check(r.status_code == 400 and r.json()["code"] == "BIZ_SETTINGS_ERROR",
       f"未知任务 → 400（{r.status_code}）")
 

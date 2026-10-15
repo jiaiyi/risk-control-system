@@ -32,6 +32,14 @@ CaseDecision = Literal["已通过", "已拒绝"]
 
 
 # ============================================================
+# 鉴权（登录 / 登出）—— 超出 PRD 本期范围的新增项，见 app/auth.py
+# ============================================================
+class LoginRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=50, description="登录账号")
+    password: str = Field(..., min_length=1, max_length=128, description="登录口令")
+
+
+# ============================================================
 # API-01 实时风险检查
 # ============================================================
 class RiskCheckRequest(BaseModel):
@@ -91,7 +99,10 @@ class RuleConditionValidateRequest(BaseModel):
 # ============================================================
 class CaseReviewRequest(BaseModel):
     decision: CaseDecision
-    reviewer: str = Field(..., max_length=50)
+    reviewer: Optional[str] = Field(
+        None, max_length=50,
+        description="审核人。不传时由服务端从登录会话取真实用户（operator_of），"
+                    "前端不应写死 —— 否则审计记不出到底是谁审的")
     review_comment: Optional[str] = None
     add_to_blacklist: bool = False
     blacklist_entity_types: Optional[list[EntityType]] = Field(

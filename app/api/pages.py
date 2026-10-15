@@ -11,16 +11,36 @@ from fastapi import APIRouter, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 
+from app.assets import register_template_globals
+from app.auth import current_user
 from app.database import SessionLocal
 
 router = APIRouter(tags=["页面"])
 
 templates = Jinja2Templates(directory="templates")
+register_template_globals(templates)
 
 
 def _render(request: Request, template: str, active: str, **extra):
+    """渲染页面，并把当前登录用户注入模板。
+
+    鉴权守卫（app/main.py 的 auth_middleware）已保证走到这里的一定是
+    已登录且有权限的用户，所以这里取用户是为了**渲染**（侧边栏按权限过滤、
+    右上角显示真实姓名角色），不再做校验。
+    """
+    try:
+        user = getattr(request.state, "user", None) or current_user(request)
+    except Exception:                             # noqa: BLE001
+        user = None
     return templates.TemplateResponse(
-        template, {"request": request, "active": active, **extra},
+        template,
+        {
+            "request": request,
+            "active": active,
+            "user": user,
+            "user_perms": sorted(user.permissions) if user else [],
+            **extra,
+        },
     )
 
 

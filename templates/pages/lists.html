@@ -2,6 +2,11 @@
 {% import "_icons.html" as ui %}
 {% block title %}名单管理{% endblock %}
 
+{# 审计人员对名单管理是「只读」（specs/PRD.md:100）。
+   导入与新增是两个不同的权限格子（PRD.md:100 vs :101），所以分开判断。 #}
+{% set can_manage = can("lists:manage", user_perms) %}
+{% set can_import = can("lists:import", user_perms) %}
+
 {% block content %}
 <!-- ==================== 统计 ==================== -->
 <div class="kpi-grid" id="listStats"></div>
@@ -31,9 +36,9 @@
           </div>
         </div>
         <div class="d-flex gap-2">
-          <button class="btn btn-sm btn-outline-secondary" id="btnImport">批量导入</button>
+          {% if can_import %}<button class="btn btn-sm btn-outline-secondary" id="btnImport">批量导入</button>{% endif %}
           <button class="btn btn-sm btn-outline-secondary" id="btnTemplate">下载模板</button>
-          <button class="btn btn-sm btn-primary" id="btnAdd">+ 新增</button>
+          {% if can_manage %}<button class="btn btn-sm btn-primary" id="btnAdd">+ 新增</button>{% endif %}
         </div>
       </div>
 
@@ -42,10 +47,11 @@
           <table class="table table-hover align-middle">
             <thead><tr>
               <th>类型</th><th>主体</th><th>主体值</th><th>原因</th>
-              <th>有效期至</th><th>操作人</th><th class="text-end">操作</th>
+              <th>有效期至</th><th>操作人</th>
+              {% if can_manage %}<th class="text-end">操作</th>{% endif %}
             </tr></thead>
             <tbody id="listBody">
-              <tr><td colspan="7" class="empty-state">
+              <tr><td colspan="{{ 7 if can_manage else 6 }}" class="empty-state">
                 <div class="spinner-border text-primary"></div></td></tr>
             </tbody>
           </table>
@@ -168,6 +174,10 @@
 
 {% block scripts %}
 <script>
+// 服务端按当前用户权限注入；下面所有 getElementById 都要判存在 ——
+// 没有权限时按钮根本不在 DOM 里，直接 addEventListener 会抛 TypeError。
+const CAN_MANAGE = {{ 'true' if can_manage else 'false' }};
+const CAN_IMPORT = {{ 'true' if can_import else 'false' }};
 let curType = "";
 let addModal = null, importModal = null;
 
@@ -185,8 +195,9 @@ function buildQuery() {
 async function loadList() {
   const data = await api("/api/lists?" + buildQuery());
   const body = document.getElementById("listBody");
+  const cols = CAN_MANAGE ? 7 : 6;
   if (!data.items.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-state">
+    body.innerHTML = `<tr><td colspan="${cols}" class="empty-state">
       ${svgIcon('list-checks', 32)}没有符合条件的名单条目</td></tr>`;
     return;
   }
@@ -201,9 +212,9 @@ async function loadList() {
         ${i.expired ? '<span class="badge badge-reject ms-1">已过期</span>' : ''}
       </td>
       <td>${i.created_by || "-"}</td>
-      <td class="text-end">
+      ${CAN_MANAGE ? `<td class="text-end">
         <button class="btn btn-sm btn-outline-danger" onclick="delItem(${i.list_id})">移除</button>
-      </td>
+      </td>` : ""}
     </tr>`).join("");
 }
 
@@ -225,7 +236,9 @@ async function loadStats() {
 
 async function delItem(id) {
   if (!confirm(`确认移除名单项 #${id}？`)) return;
-  await api(`/api/lists/${id}?operator=admin`, { method: "DELETE" });
+  // 不带 operator：服务端用 operator_of(request) 从会话取真实用户（「姓名(账号)」）。
+  // 前端写死 operator=admin 会覆盖掉它，审计日志就记不出是谁删的。
+  await api(`/api/lists/${id}`, { method: "DELETE" });
   toast("已移除（操作已记审计）");
   loadList(); loadStats();
 }
@@ -244,8 +257,13 @@ document.getElementById("fKeyword").addEventListener("keydown", e => {
   if (e.key === "Enter") loadList();
 });
 
-document.getElementById("btnAdd").addEventListener("click", () => addModal.show());
-document.getElementById("btnImport").addEventListener("click", () => importModal.show());
+// 这几个按钮在无权限时不存在于 DOM（见模板顶部 can_manage / can_import），
+// 所以一律判存在再绑定，否则整段脚本会在这里抛 TypeError 中断，
+// 连后面的正常初始化（loadStats / loadList）都跑不到。
+const btnAdd = document.getElementById("btnAdd");
+if (btnAdd) btnAdd.addEventListener("click", () => addModal.show());
+const btnImport = document.getElementById("btnImport");
+if (btnImport) btnImport.addEventListener("click", () => importModal.show());
 
 document.getElementById("btnTemplate").addEventListener("click", async () => {
   const r = await api("/api/lists/template");
@@ -259,7 +277,8 @@ document.getElementById("btnTemplate").addEventListener("click", async () => {
   URL.revokeObjectURL(url);
 });
 
-document.getElementById("btnSaveItem").addEventListener("click", async () => {
+const btnSaveItem = document.getElementById("btnSaveItem");
+if (btnSaveItem) btnSaveItem.addEventListener("click", async () => {
   const expire = document.getElementById("mExpire").value;
   try {
     await api("/api/lists", {
@@ -270,7 +289,7 @@ document.getElementById("btnSaveItem").addEventListener("click", async () => {
         entity_value: document.getElementById("mEntityValue").value.trim(),
         reason: document.getElementById("mReason").value.trim(),
         expire_time: expire ? expire.replace("T", " ") + ":00" : null,
-        created_by: "web",
+        // 不传 created_by：服务端 operator_of(request) 会填真实登录用户。
         force: document.getElementById("mForce").checked,
       }),
     });
@@ -283,12 +302,13 @@ document.getElementById("btnSaveItem").addEventListener("click", async () => {
   } catch (e) { /* 已提示 */ }
 });
 
-document.getElementById("btnDoImport").addEventListener("click", async () => {
+const btnDoImport = document.getElementById("btnDoImport");
+if (btnDoImport) btnDoImport.addEventListener("click", async () => {
   const file = document.getElementById("importFile").files[0];
   if (!file) { toast("请先选择文件", "err"); return; }
   const fd = new FormData();
   fd.append("file", file);
-  fd.append("operator", "web");
+  // 不传 operator：服务端从会话取真实登录用户，前端写死会污染审计日志。
   const box = document.getElementById("importResult");
   box.innerHTML = '<div class="spinner-border spinner-border-sm text-primary"></div> 导入中…';
   try {
@@ -337,8 +357,12 @@ document.getElementById("btnSearchArchived").addEventListener("click", async () 
 });
 
 document.addEventListener("DOMContentLoaded", () => {
-  addModal = new bootstrap.Modal(document.getElementById("addModal"));
-  importModal = new bootstrap.Modal(document.getElementById("importModal"));
+  // 弹窗容器始终在 DOM 里（只在打开时才有意义），但保险起见判存在，
+  // 这样将来真把模态框也按权限裁掉时不会炸在这里。
+  const elAdd = document.getElementById("addModal");
+  const elImport = document.getElementById("importModal");
+  if (elAdd) addModal = new bootstrap.Modal(elAdd);
+  if (elImport) importModal = new bootstrap.Modal(elImport);
 });
 
 loadStats(); loadList();

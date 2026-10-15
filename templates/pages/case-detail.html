@@ -2,6 +2,10 @@
 {% import "_icons.html" as ui %}
 {% block title %}案件详情{% endblock %}
 
+{# 案件审核处置只属于风控审核员（specs/PRD.md:99）——
+   策略师/分析师/审计人员对案件都是查看（:98「只读」），不该看到审核面板。 #}
+{% set can_review = can("cases:review", user_perms) %}
+
 {% block content %}
 <div id="detailEmpty" class="card">
   <div class="card-body empty-state">
@@ -96,7 +100,8 @@
         <div class="card-body"><div id="dListHistory" class="small"></div></div>
       </div>
 
-      <!-- 审核面板 -->
+      <!-- 审核面板（仅风控审核员可见） -->
+      {% if can_review %}
       <div class="card" id="reviewCard">
         <div class="card-header"><div class="title">审核处置</div></div>
         <div class="card-body">
@@ -128,6 +133,7 @@
           </div>
         </div>
       </div>
+      {% endif %}
 
       <!-- 重做检查 -->
       <div class="card">
@@ -256,9 +262,13 @@ document.getElementById("rvTypes").addEventListener("click", (e) => {
       <a href="/graph?entity_type=用户&entity_value=${c.user_id}">去图谱查看 ${c.user_id}</a>
     </div>`;
 
-  // 已终结的案件隐藏审核面板
-  if (!["待审核", "审核中"].includes(c.case_status)) {
-    document.getElementById("reviewCard").innerHTML = `
+  // 已终结的案件隐藏审核面板。
+  // 注意 reviewCard 对非审核员根本不在 DOM 里（见模板顶部 can_review），
+  // 所以这里必须判存在 —— 否则策略师/分析师/审计人员打开案件详情会抛
+  // TypeError 中断整段脚本，连案件信息都渲染不出来。
+  const rc = document.getElementById("reviewCard");
+  if (rc && !["待审核", "审核中"].includes(c.case_status)) {
+    rc.innerHTML = `
       <div class="card-header"><div class="title">审核处置</div></div>
       <div class="card-body">
         <div class="alert alert-secondary mb-0 small">
@@ -268,7 +278,8 @@ document.getElementById("rvTypes").addEventListener("click", (e) => {
   }
 })();
 
-document.getElementById("btnReview").addEventListener("click", async () => {
+const btnReview = document.getElementById("btnReview");
+if (btnReview) btnReview.addEventListener("click", async () => {
   const btn = document.getElementById("btnReview");
   btn.disabled = true; btn.textContent = "提交中…";
   const types = [...document.querySelectorAll("#rvTypes .badge-black")].map(e => e.dataset.t);
@@ -277,7 +288,8 @@ document.getElementById("btnReview").addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({
         decision: document.getElementById("rvDecision").value,
-        reviewer: "web_reviewer",
+        // 不传 reviewer：服务端从会话取真实登录用户（operator_of），
+        // 前端写死 "web_reviewer" 会让审计记录不出审核人是谁。
         review_comment: document.getElementById("rvComment").value.trim(),
         add_to_blacklist: document.getElementById("rvAddBlack").checked,
         blacklist_entity_types: types.length ? types : null,

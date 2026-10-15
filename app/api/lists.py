@@ -7,9 +7,10 @@
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy.orm import Session
 
+from app.auth import operator_of
 from app.database import get_db
 from app.schemas import ListItemCreateRequest
 from app.service import list_service
@@ -110,6 +111,7 @@ def download_template() -> dict:
 @router.post("/import", summary="名单批量导入（API-16）",
              description="全量校验 → 一次性返回全部错误行 → 全部通过才整批入库（SPEC Q9）")
 async def import_lists(
+    request: Request,
     file: UploadFile = File(..., description=".xlsx 或 .csv"),
     operator: str | None = Form(None),
     force: bool = Form(False, description="白名单超 90 天时的二次确认"),
@@ -117,7 +119,9 @@ async def import_lists(
 ) -> dict:
     content = await file.read()
     rows = list_service.parse_import_file(file.filename or "", content)
-    report = list_service.import_items(db, rows, operator=operator, force=force)
+    report = list_service.import_items(db, rows,
+                                       operator=operator or operator_of(request),
+                                       force=force)
 
     payload = report.to_dict()
     if not report.ok:
@@ -128,12 +132,14 @@ async def import_lists(
 
 
 @router.post("", status_code=201, summary="新增名单项（API-14）")
-def add_list_item(payload: ListItemCreateRequest, db: Session = Depends(get_db)) -> dict:
+def add_list_item(payload: ListItemCreateRequest, request: Request,
+                  db: Session = Depends(get_db)) -> dict:
     """白名单硬约束（PRD 4.6）：必须有有效期、≤90 天（超出需 force）、与黑名单互斥"""
     item = list_service.add_list_item(
         db, list_type=payload.list_type, entity_type=payload.entity_type,
         entity_value=payload.entity_value, reason=payload.reason,
-        expire_time=payload.expire_time, created_by=payload.created_by,
+        expire_time=payload.expire_time,
+        created_by=payload.created_by or operator_of(request),
         force=payload.force,
     )
     return {
@@ -145,7 +151,8 @@ def add_list_item(payload: ListItemCreateRequest, db: Session = Depends(get_db))
 
 
 @router.delete("/{list_id}", summary="移除名单项（API-15）")
-def remove_list_item(list_id: int, operator: str = Query("admin"),
+def remove_list_item(list_id: int, request: Request, operator: str | None = Query(None),
                      db: Session = Depends(get_db)) -> dict:
-    removed = list_service.remove_list_item(db, list_id, operator=operator)
+    removed = list_service.remove_list_item(db, list_id,
+                                            operator=operator or operator_of(request))
     return {"removed": True, **removed}

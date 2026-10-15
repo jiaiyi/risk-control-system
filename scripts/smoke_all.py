@@ -9,7 +9,7 @@
 
 现在每个脚本都会自己把需要的状态准备好（`smoke_decision` 发现场景数据
 滑出时间窗会自动重建），所以**顺序不再重要、单跑连跑都可重复**；
-但手敲 8 条命令仍然麻烦，也没人记得该按什么顺序跑 —— 这个脚本就是那个入口。
+但手敲 9 条命令仍然麻烦，也没人记得该按什么顺序跑 —— 这个脚本就是那个入口。
 
 用法（项目根目录）：
     ./.venv/Scripts/python.exe scripts/smoke_all.py
@@ -43,6 +43,7 @@ SUITES = [
     ("smoke_case",      "案件服务（审核 / 回写 / 冲突）", False),
     ("smoke_services",  "服务层（画像 / 图谱 / 审计 / 仿真）", False),
     ("smoke_api",       "接口层（路由 / 异常 / 分页）", False),
+    ("smoke_auth",      "登录与角色拦截（5 角色 × 权限矩阵 / 只读格子）", False),
     ("smoke_agent_live", "Agent 真实对话（多轮 / 流式）", True),
 ]
 
