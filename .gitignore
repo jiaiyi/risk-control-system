@@ -42,5 +42,9 @@ Thumbs.db
 *.tmp
 *.bak
 
+# 临时产物（headless 截图 / ACL 排障报告）
+.tmp_shots/
+.acl-recovery/
+
 # 运行时配置覆盖（通过 /api/settings 在线调整阈值 / 缓存策略后生成，属环境状态，不随代码提交）
 data/runtime_settings.json

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}审计日志{% endblock %}
 
 {% block content %}
@@ -80,7 +81,7 @@ async function loadAudit() {
   const body = $("auditBody");
   if (!data.items.length) {
     body.innerHTML = `<tr><td colspan="7" class="empty-state">
-      <div class="icon">✎</div>没有符合条件的审计记录</td></tr>`;
+      ${svgIcon('pen-line', 32)}没有符合条件的审计记录</td></tr>`;
   } else {
     body.innerHTML = data.items.map(r => `
       <tr>
@@ -106,14 +107,14 @@ async function loadStats() {
   const by = s.statistics.by_action_type;
   const total = s.statistics.total;
   $("auditStats").innerHTML = [
-    { label: "审计流水总数", value: total, icon: "✎" },
-    { label: "规则操作", value: by["规则"] || 0, icon: "≡" },
-    { label: "名单操作", value: by["名单"] || 0, icon: "☰" },
-    { label: "案件操作", value: by["案件"] || 0, icon: "◈" },
-    { label: "配置变更", value: by["配置"] || 0, icon: "⚙" },
+    { label: "审计流水总数", value: total, icon: "pen-line" },
+    { label: "规则操作", value: by["规则"] || 0, icon: "list" },
+    { label: "名单操作", value: by["名单"] || 0, icon: "list-checks" },
+    { label: "案件操作", value: by["案件"] || 0, icon: "layers" },
+    { label: "配置变更", value: by["配置"] || 0, icon: "settings" },
   ].map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value">${c.value}</div>
     </div>`).join("");
 }

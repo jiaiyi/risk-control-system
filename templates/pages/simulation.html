@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}规则仿真{% endblock %}
 
 {% block content %}
@@ -52,7 +53,7 @@
   <div class="col-lg-7">
     <div id="simEmpty" class="card">
       <div class="card-body empty-state">
-        <div class="icon">⧉</div>
+        {{ ui.icon('flask', 32) }}
         选择用户与事件类型，点「开始仿真」查看分步链路
       </div>
     </div>
@@ -117,7 +118,7 @@
   </div>
   <div class="card-body">
     <div id="replayEmpty" class="empty-state">
-      <div class="icon">↻</div>点「开始回放」查看规则命中统计
+      {{ ui.icon('refresh', 32) }}点「开始回放」查看规则命中统计
     </div>
     <div id="replayResult" class="d-none">
       <div class="kpi-grid mb-3" id="replayKpi"></div>
@@ -199,7 +200,7 @@ function renderSteps(onlyHit) {
   box.innerHTML = steps.map(s => `
     <div class="sim-step ${s.matched ? "hit" : "miss"} mb-3">
       <div class="step-title">
-        ${s.matched ? "✓" : "○"} <a href="/rules/${s.rule_id}" class="text-decoration-none">${s.rule_id}</a>
+        ${s.matched ? svgIcon('check', 13) : svgIcon('circle', 13)} <a href="/rules/${s.rule_id}" class="text-decoration-none">${s.rule_id}</a>
         ${s.rule_name}
         <span class="badge ${s.matched ? "badge-reject" : "badge-gray"} ms-1">${s.risk_score} 分</span>
         <span class="badge badge-gray ms-1">优先级 ${s.priority}</span>
@@ -239,13 +240,13 @@ function renderReplay(r) {
   document.getElementById("replayResult").classList.remove("d-none");
 
   document.getElementById("replayKpi").innerHTML = [
-    { label: "样本数", value: r.sample_count, icon: "◈" },
-    { label: "命中规则数", value: r.rule_stats.length, icon: "≡" },
-    { label: "平均评分", value: r.avg_score, icon: "▤" },
-    { label: "写入行数", value: r.side_effects.db_writes, icon: "⛔" },
+    { label: "样本数", value: r.sample_count, icon: "layers" },
+    { label: "命中规则数", value: r.rule_stats.length, icon: "list" },
+    { label: "平均评分", value: r.avg_score, icon: "activity" },
+    { label: "写入行数", value: r.side_effects.db_writes, icon: "ban" },
   ].map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value">${c.value}</div>
     </div>`).join("");
 

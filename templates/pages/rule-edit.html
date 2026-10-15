@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}规则编辑{% endblock %}
 
 {% block content %}
@@ -163,15 +164,23 @@ function parseCondition() {
   catch (e) { return { ok: false, error: "JSON 解析失败：" + e.message }; }
 }
 
-document.getElementById("btnValidate").addEventListener("click", async () => {
+/** 校验结果 = 图标 + 文本。
+    文本走 createTextNode 而不是把它拼进 innerHTML —— r.message 来自服务端，
+    拼字符串会把服务端文本当 HTML 解析。 */
+function setValidateMsg(ok, text) {
   const msg = document.getElementById("validateMsg");
+  msg.className = `small d-inline-flex align-items-center gap-1 ${ok ? "text-success" : "text-danger"}`;
+  msg.innerHTML = svgIcon(ok ? "check" : "alert", 13);
+  msg.appendChild(document.createTextNode(text));
+}
+
+document.getElementById("btnValidate").addEventListener("click", async () => {
   const parsed = parseCondition();
-  if (!parsed.ok) { msg.className = "small text-danger"; msg.textContent = parsed.error; return; }
+  if (!parsed.ok) { setValidateMsg(false, parsed.error); return; }
   const r = await api("/api/rules/validate", {
     method: "POST", body: JSON.stringify({ rule_condition: parsed.value }),
   });
-  msg.className = `small ${r.valid ? "text-success" : "text-danger"}`;
-  msg.textContent = r.valid ? "✓ 条件合法" : "✗ " + r.message;
+  setValidateMsg(r.valid, r.valid ? "条件合法" : r.message);
 });
 
 document.getElementById("ruleForm").addEventListener("submit", async (e) => {

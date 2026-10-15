@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}AI 助手{% endblock %}
 
 {% block content %}
@@ -119,7 +120,7 @@ function addAiMsg(text, tools) {
   if (tools && tools.length) {
     const chips = document.createElement("div");
     chips.className = "tool-calls";
-    chips.innerHTML = tools.map(t => `<span class="tool-chip ok">✓ ${t}</span>`).join("");
+    chips.innerHTML = tools.map(t => `<span class="tool-chip ok">${svgIcon('check', 12)} ${t}</span>`).join("");
     bubble.appendChild(chips);
   }
   const body = document.createElement("div");

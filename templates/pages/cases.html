@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}案件管理{% endblock %}
 
 {% block content %}
@@ -86,7 +87,7 @@ async function loadCases() {
   const body = document.getElementById("caseBody");
   if (!data.items.length) {
     body.innerHTML = `<tr><td colspan="8" class="empty-state">
-      <div class="icon">◈</div>没有符合条件的案件</td></tr>`;
+      ${svgIcon('layers', 32)}没有符合条件的案件</td></tr>`;
   } else {
     body.innerHTML = data.items.map(c => `
       <tr>
@@ -112,14 +113,14 @@ async function loadStats() {
   const s = await api("/api/cases/statistics");
   const by = s.by_status || {};
   document.getElementById("caseStats").innerHTML = [
-    { label: "案件总数", value: s.total, icon: "◈" },
-    { label: "待审核", value: by["待审核"] || 0, icon: "⏳" },
-    { label: "审核中", value: by["审核中"] || 0, icon: "◐" },
-    { label: "已拒绝", value: by["已拒绝"] || 0, icon: "⛔" },
-    { label: "名单冲突", value: s.conflict_cases, icon: "⚠" },
+    { label: "案件总数", value: s.total, icon: "layers" },
+    { label: "待审核", value: by["待审核"] || 0, icon: "hourglass" },
+    { label: "审核中", value: by["审核中"] || 0, icon: "loader" },
+    { label: "已拒绝", value: by["已拒绝"] || 0, icon: "ban" },
+    { label: "名单冲突", value: s.conflict_cases, icon: "alert-triangle" },
   ].map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value">${c.value}</div>
     </div>`).join("");
 }

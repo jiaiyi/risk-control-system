@@ -1,3 +1,4 @@
+{% import "_icons.html" as ui %}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -11,10 +12,39 @@
   {% block head %}{% endblock %}
 </head>
 <body>
-<div class="app-shell">
+{# 图标 sprite：<symbol> 定义只输出一次，全站 <use> 引用 #}
+{{ ui.sprite() }}
+
+{#
+  导航定义（数据驱动，不再手写 10 个 <a>）。
+  每项： (active 标识, 链接, 图标名, 中文标签)
+  分组标题在折叠态会退化成一条分隔线。
+#}
+{% set NAV_GROUPS = [
+  ("监控", [
+    ("dashboard",  "/",           "dashboard",    "仪表盘"),
+    ("risk-check", "/risk-check", "shield-alert", "风险检查"),
+  ]),
+  ("策略", [
+    ("rules",      "/rules",      "list",        "规则管理"),
+    ("simulation", "/simulation", "flask",       "规则仿真"),
+    ("lists",      "/lists",      "list-checks", "名单管理"),
+  ]),
+  ("运营", [
+    ("cases", "/cases", "briefcase", "案件管理"),
+    ("graph", "/graph", "network",   "关联图谱"),
+    ("chat",  "/chat",  "sparkles",  "AI 助手"),
+  ]),
+  ("系统", [
+    ("audit",    "/audit",    "file-text", "审计日志"),
+    ("settings", "/settings", "settings",  "系统配置"),
+  ]),
+] %}
+
+<div class="app-shell" id="appShell">
 
   <!-- ==================== 侧边栏 ==================== -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="logo-row">
       <div class="logo-mark">盾</div>
       <div class="logo-text">
@@ -23,44 +53,17 @@
       </div>
     </div>
 
-    <nav class="nav">
-      <div class="nav-group">监控</div>
-      <a class="nav-item {% if active == 'dashboard' %}active{% endif %}" href="/">
-        <span class="nav-icon">▤</span><span>仪表盘</span>
+    <nav class="side-nav">
+      {% for group, items in NAV_GROUPS %}
+      <div class="side-nav-group">{{ group }}</div>
+      {% for key, href, ic, label in items %}
+      <a class="side-nav-item {% if active == key %}active{% endif %}"
+         href="{{ href }}" data-label="{{ label }}"
+         {% if active == key %}aria-current="page"{% endif %}>
+        {{ ui.icon(ic, 18) }}<span>{{ label }}</span>
       </a>
-      <a class="nav-item {% if active == 'risk-check' %}active{% endif %}" href="/risk-check">
-        <span class="nav-icon">⌕</span><span>风险检查</span>
-      </a>
-
-      <div class="nav-group">策略</div>
-      <a class="nav-item {% if active == 'rules' %}active{% endif %}" href="/rules">
-        <span class="nav-icon">≡</span><span>规则管理</span>
-      </a>
-      <a class="nav-item {% if active == 'simulation' %}active{% endif %}" href="/simulation">
-        <span class="nav-icon">⧉</span><span>规则仿真</span>
-      </a>
-      <a class="nav-item {% if active == 'lists' %}active{% endif %}" href="/lists">
-        <span class="nav-icon">☰</span><span>名单管理</span>
-      </a>
-
-      <div class="nav-group">运营</div>
-      <a class="nav-item {% if active == 'cases' %}active{% endif %}" href="/cases">
-        <span class="nav-icon">◈</span><span>案件管理</span>
-      </a>
-      <a class="nav-item {% if active == 'graph' %}active{% endif %}" href="/graph">
-        <span class="nav-icon">⌘</span><span>关联图谱</span>
-      </a>
-      <a class="nav-item {% if active == 'chat' %}active{% endif %}" href="/chat">
-        <span class="nav-icon">✦</span><span>AI 助手</span>
-      </a>
-
-      <div class="nav-group">系统</div>
-      <a class="nav-item {% if active == 'audit' %}active{% endif %}" href="/audit">
-        <span class="nav-icon">✎</span><span>审计日志</span>
-      </a>
-      <a class="nav-item {% if active == 'settings' %}active{% endif %}" href="/settings">
-        <span class="nav-icon">⚙</span><span>系统配置</span>
-      </a>
+      {% endfor %}
+      {% endfor %}
     </nav>
 
     <div class="sidebar-footer">
@@ -75,15 +78,24 @@
   <!-- ==================== 主区域 ==================== -->
   <div class="main">
     <header class="topbar">
-      <div class="topbar-title">
-        <h1>{% block page_title %}{% endblock %}</h1>
-        <p>{% block page_subtitle %}{% endblock %}</p>
+      <div class="topbar-left">
+        <button class="icon-btn" id="btnCollapse" title="折叠 / 展开侧边栏" aria-label="折叠或展开侧边栏">
+          {{ ui.icon('chevron-left', 16) }}
+        </button>
+        <div class="topbar-title">
+          {# 默认取路由传入的 page_title / page_subtitle，页面可用同名 block 覆盖 #}
+          <h1>{% block page_title %}{{ page_title }}{% endblock %}</h1>
+          <p>{% block page_subtitle %}{{ page_subtitle }}{% endblock %}</p>
+        </div>
       </div>
       <div class="topbar-actions">
         <div class="search-box">
-          <input type="text" id="globalSearch" placeholder="搜索用户 / 案件号 / 规则">
+          {{ ui.icon('search', 15) }}
+          <input type="text" id="globalSearch" placeholder="搜索用户 / 案件号 / 规则" aria-label="全局搜索">
         </div>
-        <button class="icon-btn" title="通知">🔔</button>
+        <button class="icon-btn has-dot" title="通知" aria-label="通知">
+          {{ ui.icon('bell', 16) }}
+        </button>
         <div class="avatar avatar-sm">张</div>
       </div>
     </header>
@@ -95,8 +107,9 @@
 </div>
 
 <!-- 全局提示 -->
-<div id="toast" class="toast-box" role="status"></div>
+<div id="toast" class="toast-box" role="status" aria-live="polite"></div>
 
+<script>{{ ui.js_paths() }}</script>
 <script src="/static/vendor/bootstrap.bundle.min.js"></script>
 <script src="/static/vendor/echarts.min.js"></script>
 <script src="/static/js/app.js"></script>

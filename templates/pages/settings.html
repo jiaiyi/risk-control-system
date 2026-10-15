@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}系统配置{% endblock %}
 
 {% block content %}
@@ -241,15 +242,15 @@ async function loadHealth() {
   const m = await api("/api/health/metrics");
   const p = m.performance;
   $("healthKpi").innerHTML = [
-    { label: "请求数（采样窗口）", value: p.requests, icon: "▤" },
-    { label: "P95 耗时", value: p.p95_ms + " ms", icon: "⏱" },
-    { label: "平均耗时", value: p.avg_ms + " ms", icon: "◷" },
-    { label: "错误率", value: (p.error_rate * 100).toFixed(2) + "%", icon: "⚠" },
-    { label: "MySQL", value: m.dependencies.mysql ? "正常" : "异常", icon: "▮" },
-    { label: "Redis", value: m.dependencies.redis ? "正常" : "降级", icon: "▮" },
+    { label: "请求数（采样窗口）", value: p.requests, icon: "activity" },
+    { label: "P95 耗时", value: p.p95_ms + " ms", icon: "timer" },
+    { label: "平均耗时", value: p.avg_ms + " ms", icon: "clock" },
+    { label: "错误率", value: (p.error_rate * 100).toFixed(2) + "%", icon: "alert-triangle" },
+    { label: "MySQL", value: m.dependencies.mysql ? "正常" : "异常", icon: "database" },
+    { label: "Redis", value: m.dependencies.redis ? "正常" : "降级", icon: "database" },
   ].map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value" style="font-size:22px">${c.value}</div>
     </div>`).join("");
 

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}资损防护{% endblock %}
 
 {% block content %}
@@ -45,12 +46,12 @@ async function loadLoss() {
   const d = await api(`/api/dashboard/loss-prevention?days=${days}`);
 
   $("lossKpi").innerHTML = [
-    { label: "拦截案件数", value: d.blocked_cases, icon: "◈" },
-    { label: "涉及账号数", value: d.blocked_users, icon: "▤" },
-    { label: "预估找回资损", value: "¥" + Math.round(d.blocked_amount).toLocaleString("zh-CN"), icon: "¥" },
+    { label: "拦截案件数", value: d.blocked_cases, icon: "layers" },
+    { label: "涉及账号数", value: d.blocked_users, icon: "activity" },
+    { label: "预估找回资损", value: "¥" + Math.round(d.blocked_amount).toLocaleString("zh-CN"), icon: "banknote" },
   ].map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value">${c.value}</div>
     </div>`).join("");
 

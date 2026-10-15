@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}规则管理{% endblock %}
 
 {% block content %}
@@ -92,7 +93,7 @@ async function loadRules() {
 
   if (!data.items.length) {
     body.innerHTML = `<tr><td colspan="10" class="empty-state">
-      <div class="icon">≡</div>没有符合条件的规则</td></tr>`;
+      ${svgIcon('list', 32)}没有符合条件的规则</td></tr>`;
   } else {
     body.innerHTML = data.items.map(r => `
       <tr>
@@ -126,14 +127,14 @@ async function loadRules() {
 async function loadStats() {
   const s = await api("/api/rules/statistics");
   const cards = [
-    { label: "规则总数", value: s.total, icon: "≡" },
-    { label: "已启用", value: s.enabled, icon: "✓" },
-    { label: "已停用", value: s.total - s.enabled, icon: "⏸" },
-    { label: "覆盖场景", value: Object.keys(s.by_category).length, icon: "◈" },
+    { label: "规则总数", value: s.total, icon: "list" },
+    { label: "已启用", value: s.enabled, icon: "check" },
+    { label: "已停用", value: s.total - s.enabled, icon: "pause" },
+    { label: "覆盖场景", value: Object.keys(s.by_category).length, icon: "layers" },
   ];
   document.getElementById("ruleStats").innerHTML = cards.map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value">${c.value}</div>
     </div>`).join("");
 }

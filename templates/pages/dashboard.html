@@ -1,38 +1,39 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}仪表盘{% endblock %}
 
 {% block content %}
 <!-- ==================== KPI 卡片 ==================== -->
 <div class="kpi-grid">
   <div class="kpi-card">
-    <div class="kpi-top"><span class="kpi-label">今日评估量</span><span class="kpi-icon">▤</span></div>
+    <div class="kpi-top"><span class="kpi-label">今日评估量</span><span class="kpi-icon">{{ ui.icon('activity', 15) }}</span></div>
     <div class="kpi-value" id="kpiAssessments">-</div>
     <div class="kpi-delta" id="kpiAssessDelta">&nbsp;</div>
     <div class="kpi-spark" id="sparkAssess"></div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-top"><span class="kpi-label">高风险数</span><span class="kpi-icon">⚠</span></div>
+    <div class="kpi-top"><span class="kpi-label">高风险数</span><span class="kpi-icon">{{ ui.icon('alert-triangle', 15) }}</span></div>
     <div class="kpi-value" id="kpiHigh">-</div>
     <div class="kpi-delta" id="kpiHighDelta">&nbsp;</div>
     <div class="kpi-spark" id="sparkHigh"></div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-top"><span class="kpi-label">待审案件</span><span class="kpi-icon">◈</span></div>
+    <div class="kpi-top"><span class="kpi-label">待审案件</span><span class="kpi-icon">{{ ui.icon('layers', 15) }}</span></div>
     <div class="kpi-value" id="kpiPending">-</div>
     <div class="kpi-delta" id="kpiPendingDelta">&nbsp;</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-top"><span class="kpi-label">通过率</span><span class="kpi-icon">✓</span></div>
+    <div class="kpi-top"><span class="kpi-label">通过率</span><span class="kpi-icon">{{ ui.icon('check', 15) }}</span></div>
     <div class="kpi-value" id="kpiPassRate">-</div>
     <div class="kpi-delta" id="kpiPassDelta">&nbsp;</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-top"><span class="kpi-label">拦截率</span><span class="kpi-icon">⛔</span></div>
+    <div class="kpi-top"><span class="kpi-label">拦截率</span><span class="kpi-icon">{{ ui.icon('ban', 15) }}</span></div>
     <div class="kpi-value" id="kpiBlockRate">-</div>
     <div class="kpi-delta" id="kpiBlockDelta">&nbsp;</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-top"><span class="kpi-label">预估找回资损</span><span class="kpi-icon">¥</span></div>
+    <div class="kpi-top"><span class="kpi-label">预估找回资损</span><span class="kpi-icon">{{ ui.icon('banknote', 15) }}</span></div>
     <div class="kpi-value" id="kpiLoss">-</div>
     <div class="kpi-delta" id="kpiLossDelta">&nbsp;</div>
   </div>
@@ -180,7 +181,10 @@ function delta(id, n, neutral) {
 
 function drawSpark(id, data, color) {
   const el = document.getElementById(id);
-  if (!el || !data.length) return;
+  if (!el) return;
+  // 只有 1 个数据点时画出来就是一根细线，反而像 bug —— 直接隐藏
+  if (!data || data.length < 2) { el.style.display = "none"; return; }
+  el.style.display = "";
   initChart(id, {
     grid: { left: 0, right: 0, top: 2, bottom: 0 },
     xAxis: { type: "category", show: false, data: data.map((_, i) => i) },
@@ -196,7 +200,7 @@ async function loadRealtime() {
   const data = await api("/api/dashboard/realtime?limit=8");
   const body = document.getElementById("realtimeBody");
   if (!data.items.length) {
-    body.innerHTML = `<tr><td colspan="5" class="empty-state"><div class="icon">◌</div>暂无风控事件</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="empty-state">${svgIcon('inbox', 32)}暂无风控事件</td></tr>`;
     return;
   }
   body.innerHTML = data.items.map(e => `

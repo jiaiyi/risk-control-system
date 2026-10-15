@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}名单管理{% endblock %}
 
 {% block content %}
@@ -186,7 +187,7 @@ async function loadList() {
   const body = document.getElementById("listBody");
   if (!data.items.length) {
     body.innerHTML = `<tr><td colspan="7" class="empty-state">
-      <div class="icon">☰</div>没有符合条件的名单条目</td></tr>`;
+      ${svgIcon('list-checks', 32)}没有符合条件的名单条目</td></tr>`;
     return;
   }
   body.innerHTML = data.items.map(i => `
@@ -209,15 +210,15 @@ async function loadList() {
 async function loadStats() {
   const s = await api("/api/lists/statistics");
   const cards = [
-    { label: "黑名单", value: s.by_list_type["黑名单"] || 0, icon: "⛔" },
-    { label: "白名单", value: s.by_list_type["白名单"] || 0, icon: "✓" },
-    { label: "灰名单", value: s.by_list_type["灰名单"] || 0, icon: "⚠" },
-    { label: "已过期待归档", value: s.expired, icon: "⌛" },
-    { label: "历史归档", value: s.archived, icon: "▤" },
+    { label: "黑名单", value: s.by_list_type["黑名单"] || 0, icon: "ban" },
+    { label: "白名单", value: s.by_list_type["白名单"] || 0, icon: "check" },
+    { label: "灰名单", value: s.by_list_type["灰名单"] || 0, icon: "alert-triangle" },
+    { label: "已过期待归档", value: s.expired, icon: "hourglass" },
+    { label: "历史归档", value: s.archived, icon: "activity" },
   ];
   document.getElementById("listStats").innerHTML = cards.map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value">${c.value}</div>
     </div>`).join("");
 }

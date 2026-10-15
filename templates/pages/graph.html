@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ui %}
 {% block title %}关联图谱{% endblock %}
 
 {% block content %}
@@ -51,7 +52,7 @@
   <div class="card-body">
     <div id="graphChart"></div>
     <div id="graphEmpty" class="empty-state" style="display:none">
-      <div class="icon">⌘</div>该主体没有关联数据
+      {{ ui.icon('network', 32) }}该主体没有关联数据
     </div>
   </div>
 </div>
@@ -142,13 +143,13 @@ async function loadGraph() {
 
   const users = data.nodes.filter(n => n.type === "用户").length;
   document.getElementById("gStats").innerHTML = [
-    { label: "节点数", value: data.node_count, icon: "◈" },
-    { label: "关联账号", value: users, icon: "▤" },
-    { label: "关系边", value: data.edge_count, icon: "⌇" },
-    { label: "是否截断", value: data.truncated ? "是" : "否", icon: "✂" },
+    { label: "节点数", value: data.node_count, icon: "layers" },
+    { label: "关联账号", value: users, icon: "activity" },
+    { label: "关系边", value: data.edge_count, icon: "share-2" },
+    { label: "是否截断", value: data.truncated ? "是" : "否", icon: "scissors" },
   ].map(c => `
     <div class="kpi-card">
-      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${c.icon}</span></div>
+      <div class="kpi-top"><span class="kpi-label">${c.label}</span><span class="kpi-icon">${svgIcon(c.icon, 15)}</span></div>
       <div class="kpi-value" style="font-size:22px">${c.value}</div>
     </div>`).join("");
 
@@ -209,8 +210,10 @@ document.getElementById("btnJudge").addEventListener("click", async () => {
   const ev = document.getElementById("gEntityValue").value.trim();
   const r = await api(`/api/graph/related-accounts?entity_type=${encodeURIComponent(et)}` +
                       `&entity_value=${encodeURIComponent(ev)}&min_accounts=3`);
+  // toast 走 textContent，塞不进 SVG；而且已触发时 toast 本身会变红，
+  // 这里就不再加 ⚠ 这类修饰字形了
   toast(`${et} ${ev} 关联 ${r.account_count} 个账号` +
-        `（阈值 ${r.threshold}）${r.reached_threshold ? "，已达聚集阈值 ⚠" : ""}`,
+        `（阈值 ${r.threshold}）${r.reached_threshold ? "，已达聚集阈值" : ""}`,
         r.reached_threshold ? "err" : "ok");
 });
 

@@ -29,6 +29,22 @@ function toast(msg, type = "ok", ms = 3200) {
   setTimeout(() => el.remove(), ms);
 }
 
+/* ---------------- 图标 ----------------
+   路径表由 base.html 注入（window.ICON_PATHS），与 templates/_icons.html 的
+   PATHS 是同一份数据 —— 服务端 {{ ui.icon() }} 和这里拼出来的 SVG 完全一致。
+
+   JS 里为什么要自己拼而不用 sprite 的 <use>：统计卡、空状态、表格行都是
+   innerHTML 动态生成的，用 <use href="#i-x"> 也行，但拼内联路径少一次
+   shadow DOM 查找，也让打印/导出时图标不依赖 sprite 是否还在 DOM 里。 */
+function svgIcon(name, size = 16, cls = "") {
+  const body = (window.ICON_PATHS || {})[name];
+  // 图标名拼错时别静默渲染成空白 —— 控制台点名，界面留空但不报错
+  if (!body) { console.warn(`[svgIcon] 未知图标名: ${name}`); return ""; }
+  return `<svg class="icon ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24"`
+    + ` fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"`
+    + ` stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+}
+
 /** 决策 → 徽章 class（对齐后端 decision 枚举） */
 const DECISION_BADGE = {
   "通过": "badge-pass",
@@ -162,3 +178,55 @@ document.addEventListener("DOMContentLoaded", () => {
     else location.href = `/rules?keyword=${encodeURIComponent(q)}`;
   });
 });
+
+/* ---------------- 侧边栏折叠 ----------------
+   状态存 localStorage（隐私模式下静默降级为不持久化）。
+   折叠后内容区变宽，需要通知 ECharts 重算尺寸 —— 否则图表会被拉伸变形。 */
+(function () {
+  const shell = document.getElementById("appShell");
+  const btn = document.getElementById("btnCollapse");
+  if (!shell || !btn) return;
+
+  const KEY = "risk:sidebar:collapsed";
+
+  // 优先级：URL 参数 > localStorage。
+  // 支持 URL 参数不光是为了调试 —— 它让「侧边栏收起」成为一个可分享的链接状态。
+  const qs = new URLSearchParams(location.search);
+  const forced = qs.get("sidebar");
+  if (forced === "collapsed" || forced === "expanded") {
+    const collapsed = forced === "collapsed";
+    shell.classList.toggle("collapsed", collapsed);
+    btn.style.transform = collapsed ? "rotate(180deg)" : "";
+  } else {
+    try {
+      if (localStorage.getItem(KEY) === "1") {
+        shell.classList.add("collapsed");
+        btn.style.transform = "rotate(180deg)";
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  btn.addEventListener("click", () => {
+    const collapsed = shell.classList.toggle("collapsed");
+    btn.style.transform = collapsed ? "rotate(180deg)" : "";
+    try { localStorage.setItem(KEY, collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
+    // 等 CSS 过渡（.2s）走完再 resize，避免图表拿到中间态尺寸
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 220);
+  });
+
+  // 排查 UI 用：?diag=1 时给侧边栏各元素描边
+  //   黄 = 导航项占位，绿 = 图标占位，蓝 = 分组标题占位
+  // 配 headless 截图即可看出「元素占了空间但内容不可见」这类问题。
+  if (qs.get("diag") === "1") {
+    setTimeout(() => {
+      document.querySelectorAll(".side-nav-item").forEach(el => {
+        el.style.background = "rgba(250, 204, 21, .4)";
+        const svg = el.querySelector("svg");
+        if (svg) svg.style.background = "rgba(34, 197, 94, .5)";
+      });
+      document.querySelectorAll(".side-nav-group").forEach(el => {
+        el.style.background = "rgba(59, 130, 246, .4)";
+      });
+    }, 400);
+  }
+})();
